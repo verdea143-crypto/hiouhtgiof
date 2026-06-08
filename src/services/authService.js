@@ -1,4 +1,12 @@
-import { supabase } from '../db/dbClient';
+import { auth } from '../db/firebaseClient';
+import { 
+  createUserWithEmailAndPassword, 
+  signInWithEmailAndPassword, 
+  signOut as firebaseSignOut, 
+  onAuthStateChanged,
+  GoogleAuthProvider,
+  signInWithPopup
+} from 'firebase/auth';
 
 export const authService = {
   /**
@@ -8,13 +16,9 @@ export const authService = {
    * @returns {Promise<Object>} User details
    */
   async signUp(email, password) {
-    if (supabase) {
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-      });
-      if (error) throw error;
-      return data.user;
+    if (auth) {
+      const credential = await createUserWithEmailAndPassword(auth, email, password);
+      return credential.user;
     } else {
       // Local Mode
       const usersStr = localStorage.getItem('local_auth_db');
@@ -47,13 +51,9 @@ export const authService = {
    * @returns {Promise<Object>} User details
    */
   async signIn(email, password) {
-    if (supabase) {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-      if (error) throw error;
-      return data.user;
+    if (auth) {
+      const credential = await signInWithEmailAndPassword(auth, email, password);
+      return credential.user;
     } else {
       // Local Mode
       const usersStr = localStorage.getItem('local_auth_db');
@@ -71,13 +71,26 @@ export const authService = {
   },
 
   /**
+   * Signs in using Google Sign-In.
+   * @returns {Promise<Object>} User details
+   */
+  async signInWithGoogle() {
+    if (auth) {
+      const provider = new GoogleAuthProvider();
+      const credential = await signInWithPopup(auth, provider);
+      return credential.user;
+    } else {
+      throw new Error('El inicio de sesión con Google no está disponible en Modo Local.');
+    }
+  },
+
+  /**
    * Signs out the current user.
    * @returns {Promise<void>}
    */
   async signOut() {
-    if (supabase) {
-      const { error } = await supabase.auth.signOut();
-      if (error) throw error;
+    if (auth) {
+      await firebaseSignOut(auth);
     } else {
       // Local Mode
       localStorage.removeItem('local_session_user');
@@ -89,14 +102,15 @@ export const authService = {
    * @returns {Promise<Object|null>}
    */
   async getCurrentUser() {
-    if (supabase) {
-      try {
-        const { data, error } = await supabase.auth.getUser();
-        if (error || !data) return null;
-        return data.user;
-      } catch (e) {
-        return null;
-      }
+    if (auth) {
+      return new Promise((resolve) => {
+        const unsubscribe = onAuthStateChanged(auth, (user) => {
+          unsubscribe();
+          resolve(user || null);
+        }, () => {
+          resolve(null);
+        });
+      });
     } else {
       // Local Mode
       const sessionUser = localStorage.getItem('local_session_user');

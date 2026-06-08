@@ -27,21 +27,27 @@ export const Settings = () => {
   const themeAccent = useBetStore(state => state.themeAccent);
   const setThemeAccent = useBetStore(state => state.setThemeAccent);
 
-  // Supabase Inputs
-  const [supabaseUrl, setSupabaseUrl] = useState('');
-  const [supabaseKey, setSupabaseKey] = useState('');
+  // Firebase Config Input
+  const [firebaseConfigStr, setFirebaseConfigStr] = useState('');
   const [isCopied, setIsCopied] = useState(false);
 
   // Load current config
   useEffect(() => {
     try {
-      const configStr = localStorage.getItem('supabase_config');
+      const configStr = localStorage.getItem('firebase_config');
       if (configStr) {
-        const config = JSON.parse(configStr);
-        if (config) {
-          setSupabaseUrl(config.url || '');
-          setSupabaseKey(config.anonKey || '');
-        }
+        const parsed = JSON.parse(configStr);
+        setFirebaseConfigStr(JSON.stringify(parsed, null, 2));
+      } else {
+        const fallback = {
+          apiKey: "AIzaSyC0AQ1DaWuRcn7DUYbCkHPhqdSp14chcBs",
+          authDomain: "betflow-fe16f.firebaseapp.com",
+          projectId: "betflow-fe16f",
+          storageBucket: "betflow-fe16f.firebasestorage.app",
+          messagingSenderId: "967619664166",
+          appId: "1:967619664166:web:dee34b0d840b496fdc89e7"
+        };
+        setFirebaseConfigStr(JSON.stringify(fallback, null, 2));
       }
     } catch (e) {
       console.error(e);
@@ -49,27 +55,31 @@ export const Settings = () => {
   }, []);
 
   const handleSaveConfig = () => {
-    if (!supabaseUrl.trim() || !supabaseKey.trim()) {
-      toast.error('Por favor, introduce una URL y Anon Key válidas.');
+    if (!firebaseConfigStr.trim()) {
+      toast.error('Por favor, introduce una configuración de Firebase en formato JSON.');
       return;
     }
 
     try {
-      const config = { url: supabaseUrl.trim(), anonKey: supabaseKey.trim() };
-      localStorage.setItem('supabase_config', JSON.stringify(config));
-      toast.success('Configuración guardada. Reiniciando la app para conectar...');
+      const parsed = JSON.parse(firebaseConfigStr.trim());
+      if (!parsed.apiKey || !parsed.projectId) {
+        toast.error('Faltan campos mínimos obligatorios en la configuración (apiKey y projectId).');
+        return;
+      }
+      localStorage.setItem('firebase_config', JSON.stringify(parsed));
+      toast.success('Configuración de Firebase guardada. Reiniciando la app para conectar...');
       setTimeout(() => {
         window.location.reload();
       }, 1500);
     } catch (e) {
-      toast.error('Error al guardar la configuración.');
+      toast.error('Formato JSON no válido. Por favor, revisa la sintaxis.');
     }
   };
 
   const handleDisconnect = () => {
-    if (window.confirm('¿Deseas desconectar la nube de Supabase? La aplicación volverá a operar únicamente en modo Local.')) {
+    if (window.confirm('¿Deseas desconectar la nube de Firebase? La aplicación volverá a operar únicamente en modo Local.')) {
       try {
-        localStorage.removeItem('supabase_config');
+        localStorage.removeItem('firebase_config');
         toast.success('Nube desconectada. Reiniciando la app...');
         setTimeout(() => {
           window.location.reload();
@@ -142,86 +152,20 @@ export const Settings = () => {
     }
   };
 
-  const sqlScript = `-- 1. TABLA DE TIPSTERS
-CREATE TABLE tipsters (
-  id TEXT PRIMARY KEY,
-  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,
-  description TEXT
-);
-
--- Habilitar seguridad de nivel de fila (RLS)
-ALTER TABLE tipsters ENABLE ROW LEVEL SECURITY;
-
--- Políticas de seguridad RLS
-CREATE POLICY "Users can manage their own tipsters" ON tipsters
-  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
-
-
--- 2. TABLA DE BANCAS (BANKROLLS)
-CREATE TABLE bankrolls (
-  id TEXT PRIMARY KEY,
-  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,
-  initial_balance NUMERIC NOT NULL DEFAULT 0,
-  description TEXT
-);
-
--- Habilitar RLS
-ALTER TABLE bankrolls ENABLE ROW LEVEL SECURITY;
-
--- Políticas de seguridad RLS
-CREATE POLICY "Users can manage their own bankrolls" ON bankrolls
-  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
-
-
--- 3. TABLA DE TRANSACCIONES (DEPÓSITOS/RETIROS)
-CREATE TABLE transactions (
-  id TEXT PRIMARY KEY,
-  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  bankroll_id TEXT NOT NULL REFERENCES bankrolls(id) ON DELETE CASCADE,
-  type TEXT NOT NULL CHECK (type IN ('deposit', 'withdrawal')),
-  amount NUMERIC NOT NULL DEFAULT 0,
-  date DATE NOT NULL DEFAULT CURRENT_DATE,
-  description TEXT
-);
-
--- Habilitar RLS
-ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
-
--- Políticas de seguridad RLS
-CREATE POLICY "Users can manage their own transactions" ON transactions
-  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
-
-
--- 4. TABLA DE APUESTAS (BETS)
-CREATE TABLE bets (
-  id TEXT PRIMARY KEY,
-  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  sport TEXT NOT NULL,
-  event TEXT NOT NULL,
-  market TEXT NOT NULL,
-  odds NUMERIC NOT NULL,
-  stake NUMERIC NOT NULL,
-  stake_units NUMERIC,
-  bookmaker TEXT NOT NULL,
-  date DATE NOT NULL DEFAULT CURRENT_DATE,
-  status TEXT NOT NULL CHECK (status IN ('pending', 'won', 'lost', 'void')),
-  bankroll_id TEXT NOT NULL REFERENCES bankrolls(id) ON DELETE CASCADE,
-  tipster_id TEXT REFERENCES tipsters(id) ON DELETE SET NULL
-);
-
--- Habilitar RLS
-ALTER TABLE bets ENABLE ROW LEVEL SECURITY;
-
--- Políticas de seguridad RLS
-CREATE POLICY "Users can manage their own bets" ON bets
-  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);`;
+  const firestoreRules = `rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{collection}/{document} {
+      allow create: if request.auth != null && request.resource.data.user_id == request.auth.uid;
+      allow read, update, delete: if request.auth != null && resource.data.user_id == request.auth.uid;
+    }
+  }
+}`;
 
   const copyToClipboard = () => {
-    navigator.clipboard.writeText(sqlScript);
+    navigator.clipboard.writeText(firestoreRules);
     setIsCopied(true);
-    toast.success('Script SQL copiado al portapapeles.');
+    toast.success('Reglas de Seguridad de Firestore copiadas al portapapeles.');
     setTimeout(() => setIsCopied(false), 2000);
   };
 
@@ -234,43 +178,55 @@ CREATE POLICY "Users can manage their own bets" ON bets
           Configuración
         </h1>
         <p style={{ color: 'var(--color-text-secondary)', fontSize: '14px' }}>
-          Configura tu base de datos Supabase, haz copias de seguridad e inyecta datos de prueba.
+          Configura tu base de datos Firebase, haz copias de seguridad e inyecta datos de prueba.
         </p>
       </div>
 
       {/* Grid panels */}
       <div className="grid-cols-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
         
-        {/* Supabase Config Card */}
+        {/* Firebase Config Card */}
         <div className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <Key size={20} style={{ color: 'var(--color-emerald)' }} />
-            <h3 style={{ fontSize: '18px', fontWeight: 700, color: '#f3f4f6' }}>Conexión Supabase (Cloud)</h3>
+            <Key size={20} style={{ color: 'var(--color-accent)' }} />
+            <h3 style={{ fontSize: '18px', fontWeight: 700, color: '#f3f4f6' }}>Conexión Firebase (Cloud)</h3>
           </div>
           
+          {/* Advertencia de Migración de Supabase */}
+          <div style={{ 
+            backgroundColor: 'rgba(239, 68, 68, 0.08)', 
+            border: '1px solid rgba(239, 68, 68, 0.2)', 
+            borderRadius: '10px', 
+            padding: '12px 16px',
+            display: 'flex',
+            gap: '12px',
+            alignItems: 'flex-start'
+          }}>
+            <AlertCircle size={20} style={{ color: 'var(--color-crimson)', flexShrink: 0, marginTop: '2px' }} />
+            <div style={{ fontSize: '13px', color: '#fca5a5', lineHeight: '1.5' }}>
+              <strong style={{ display: 'block', marginBottom: '4px' }}>¡Atención usuarios de Supabase!</strong>
+              Si tenías datos guardados en la nube anterior de Supabase, asegúrate de <strong>exportar una copia de seguridad (JSON) antes</strong> de guardar la configuración de Firebase. Luego podrás importarla en tu nueva base de datos cloud de Firebase.
+            </div>
+          </div>
+
           <div style={{ fontSize: '13px', color: 'var(--color-text-secondary)' }}>
-            Configura las claves de tu proyecto de Supabase para sincronizar tus apuestas y acceder desde cualquier dispositivo de forma segura.
+            Pega el objeto de configuración JSON de tu proyecto de Firebase (SDK setup / Configuración Web) para habilitar la nube y sincronizar tus apuestas de forma segura.
           </div>
 
           <div className="form-group">
-            <label className="form-label">SUPABASE_URL</label>
-            <input 
-              type="text" 
-              placeholder="https://xxxx.supabase.co" 
+            <label className="form-label">FIREBASE CONFIGURATION (JSON)</label>
+            <textarea 
+              placeholder={`{\n  "apiKey": "AIzaSy...",\n  "authDomain": "...",\n  "projectId": "...",\n  "storageBucket": "...",\n  "messagingSenderId": "...",\n  "appId": "..."\n}`} 
               className="form-input"
-              value={supabaseUrl}
-              onChange={(e) => setSupabaseUrl(e.target.value)}
-            />
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">SUPABASE_ANON_KEY</label>
-            <input 
-              type="password" 
-              placeholder="eyJhbGciOiJIUzI1NiIsIn..." 
-              className="form-input"
-              value={supabaseKey}
-              onChange={(e) => setSupabaseKey(e.target.value)}
+              value={firebaseConfigStr}
+              onChange={(e) => setFirebaseConfigStr(e.target.value)}
+              rows={8}
+              style={{
+                fontFamily: 'Consolas, monospace',
+                fontSize: '13px',
+                lineHeight: '1.5',
+                resize: 'vertical'
+              }}
             />
           </div>
 
@@ -406,14 +362,14 @@ CREATE POLICY "Users can manage their own bets" ON bets
         </div>
       </div>
 
-      {/* SQL Script Viewer Panel */}
+      {/* SQL / Rules Viewer Panel */}
       <div className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
         <div className="flex-between">
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <Database size={20} style={{ color: '#8b5cf6' }} />
             <div>
-              <h3 style={{ fontSize: '18px', fontWeight: 700, color: '#f3f4f6' }}>Supabase SQL Schema & RLS Script</h3>
-              <p style={{ color: 'var(--color-text-secondary)', fontSize: '12px' }}>Ejecuta este código en el editor SQL de Supabase para inicializar las tablas y políticas de seguridad.</p>
+              <h3 style={{ fontSize: '18px', fontWeight: 700, color: '#f3f4f6' }}>Reglas de Seguridad de Firestore (Security Rules)</h3>
+              <p style={{ color: 'var(--color-text-secondary)', fontSize: '12px' }}>Publica estas reglas en tu consola de Firebase Firestore para proteger tus datos por cada usuario.</p>
             </div>
           </div>
           <button 
@@ -422,7 +378,7 @@ CREATE POLICY "Users can manage their own bets" ON bets
             style={{ padding: '6px 12px', fontSize: '13px', gap: '6px' }}
           >
             {isCopied ? <Check size={14} style={{ color: 'var(--color-emerald)' }} /> : <Clipboard size={14} />}
-            {isCopied ? 'Copiado' : 'Copiar Código'}
+            {isCopied ? 'Copiado' : 'Copiar Reglas'}
           </button>
         </div>
 
@@ -441,7 +397,7 @@ CREATE POLICY "Users can manage their own bets" ON bets
             lineHeight: '1.5',
             textAlign: 'left'
           }}>
-            {sqlScript}
+            {firestoreRules}
           </pre>
         </div>
       </div>

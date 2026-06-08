@@ -1,10 +1,60 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { toast } from 'sonner';
-import { supabase } from '../db/dbClient';
+import { db } from '../db/firebaseClient';
 import { authService } from '../services/authService';
+import {
+  collection,
+  getDocs,
+  query,
+  where,
+  doc,
+  setDoc,
+  deleteDoc,
+  writeBatch,
+  updateDoc
+} from 'firebase/firestore';
 
 const generateId = (prefix) => `${prefix}_${Math.random().toString(36).substring(2, 11)}`;
+
+// Helper to delete user data in chunks of 500
+const deleteUserCollections = async (db, userId, collections) => {
+  const allDeletes = [];
+  
+  for (const colName of collections) {
+    const colRef = collection(db, colName);
+    const q = query(colRef, where('user_id', '==', userId));
+    const querySnapshot = await getDocs(q);
+    querySnapshot.forEach((docSnap) => {
+      allDeletes.push(docSnap.ref);
+    });
+  }
+  
+  const CHUNK_SIZE = 500;
+  for (let i = 0; i < allDeletes.length; i += CHUNK_SIZE) {
+    const chunk = allDeletes.slice(i, i + CHUNK_SIZE);
+    const batch = writeBatch(db);
+    chunk.forEach((ref) => {
+      batch.delete(ref);
+    });
+    await batch.commit();
+  }
+};
+
+// Helper to batch insert docs in chunks of 500
+const batchInsertDocs = async (db, colName, docs) => {
+  if (!docs || docs.length === 0) return;
+  const CHUNK_SIZE = 500;
+  for (let i = 0; i < docs.length; i += CHUNK_SIZE) {
+    const chunk = docs.slice(i, i + CHUNK_SIZE);
+    const batch = writeBatch(db);
+    chunk.forEach((item) => {
+      const docRef = item.id ? doc(db, colName, item.id) : doc(collection(db, colName));
+      batch.set(docRef, item);
+    });
+    await batch.commit();
+  }
+};
 
 export const useBetStore = create(
   persist(
@@ -21,7 +71,7 @@ export const useBetStore = create(
       themeAccent: 'emerald',
 
       // Helper Getters (Selectors)
-      isCloudActive: () => supabase !== null,
+      isCloudActive: () => db !== null,
       
       getBankrollBalance: (bankrollId) => {
         const { bankrolls, bets, transactions } = get();
@@ -73,7 +123,7 @@ export const useBetStore = create(
           const currentUser = await authService.getCurrentUser();
           set({ user: currentUser });
           
-          if (currentUser && supabase) {
+          if (currentUser && db) {
             await get().fetchCloudData(currentUser.id);
           }
         } catch (e) {
@@ -85,29 +135,30 @@ export const useBetStore = create(
       },
 
       fetchCloudData: async (userId) => {
-        if (!supabase) return;
+        if (!db) return;
         set({ isLoading: true });
         try {
-          const [betsRes, bankrollsRes, tipstersRes, transactionsRes] = await Promise.all([
-            supabase.from('bets').select('*').eq('user_id', userId),
-            supabase.from('bankrolls').select('*').eq('user_id', userId),
-            supabase.from('tipsters').select('*').eq('user_id', userId),
-            supabase.from('transactions').select('*').eq('user_id', userId)
-          ]);
-
-          if (betsRes.error) throw betsRes.error;
-          if (bankrollsRes.error) throw bankrollsRes.error;
-          if (tipstersRes.error) throw tipstersRes.error;
-          if (transactionsRes.error) throw transactionsRes.error;
-
-          set({
-            bets: betsRes.data || [],
-            bankrolls: bankrollsRes.data || [],
-            tipsters: tipstersRes.data || [],
-            transactions: transactionsRes.data || []
+          const collections = ['bets', 'bankrolls', 'tipsters', 'transactions'];
+          const fetchPromises = collections.map(async (colName) => {
+            const colRef = collection(db, colName);
+            const q = query(colRef, where('user_id', '==', userId));
+            const querySnapshot = await getDocs(q);
+            const data = [];
+            querySnapshot.forEach((docSnap) => {
+              data.push({ ...docSnap.data(), id: docSnap.id });
+            });
+            return { colName, data };
           });
+
+          const results = await Promise.all(fetchPromises);
+          const stateUpdate = {};
+          results.forEach(({ colName, data }) => {
+            stateUpdate[colName] = data;
+          });
+
+          set(stateUpdate);
         } catch (e) {
-          console.error('Error fetching data from Supabase:', e);
+          console.error('Error fetching data from Firestore:', e);
           toast.error('Error al descargar los datos de la nube.');
         } finally {
           set({ isLoading: false });
@@ -116,7 +167,7 @@ export const useBetStore = create(
 
       setUser: async (user) => {
         set({ user });
-        if (user && supabase) {
+        if (user && db) {
           await get().fetchCloudData(user.id);
         } else if (!user) {
           // If sign out, clear state
@@ -211,39 +262,27 @@ export const useBetStore = create(
           }
         ];
 
-        if (supabase && user) {
+        if (db && user) {
           set({ isLoading: true });
           try {
             // Delete old data first to avoid clutter
-            await Promise.all([
-              supabase.from('bets').delete().eq('user_id', userId),
-              supabase.from('transactions').delete().eq('user_id', userId),
-              supabase.from('bankrolls').delete().eq('user_id', userId),
-              supabase.from('tipsters').delete().eq('user_id', userId)
-            ]);
+            await deleteUserCollections(db, userId, ['bets', 'transactions', 'bankrolls', 'tipsters']);
 
-            // Confirmed inserts
-            const tipstersRes = await supabase.from('tipsters').insert(mockTipsters).select();
-            if (tipstersRes.error) throw tipstersRes.error;
-            
-            const bankrollsRes = await supabase.from('bankrolls').insert(mockBankrolls).select();
-            if (bankrollsRes.error) throw bankrollsRes.error;
-            
-            const transRes = await supabase.from('transactions').insert(mockTransactions).select();
-            if (transRes.error) throw transRes.error;
-
-            const betsRes = await supabase.from('bets').insert(mockBets).select();
-            if (betsRes.error) throw betsRes.error;
+            // Batch insert new mock data using 500-safe helper
+            await batchInsertDocs(db, 'tipsters', mockTipsters);
+            await batchInsertDocs(db, 'bankrolls', mockBankrolls);
+            await batchInsertDocs(db, 'transactions', mockTransactions);
+            await batchInsertDocs(db, 'bets', mockBets);
 
             set({
-              tipsters: tipstersRes.data || [],
-              bankrolls: bankrollsRes.data || [],
-              transactions: transRes.data || [],
-              bets: betsRes.data || []
+              tipsters: mockTipsters,
+              bankrolls: mockBankrolls,
+              transactions: mockTransactions,
+              bets: mockBets
             });
             toast.success('Datos de prueba cargados en la nube con éxito.');
           } catch (e) {
-            console.error('Error seeding data to Supabase:', e);
+            console.error('Error seeding data to Firestore:', e);
             toast.error(`Error al cargar datos en la nube: ${e.message}`);
           } finally {
             set({ isLoading: false });
@@ -262,15 +301,10 @@ export const useBetStore = create(
 
       clearAllData: async () => {
         const { user } = get();
-        if (supabase && user) {
+        if (db && user) {
           set({ isLoading: true });
           try {
-            await Promise.all([
-              supabase.from('bets').delete().eq('user_id', user.id),
-              supabase.from('transactions').delete().eq('user_id', user.id),
-              supabase.from('bankrolls').delete().eq('user_id', user.id),
-              supabase.from('tipsters').delete().eq('user_id', user.id)
-            ]);
+            await deleteUserCollections(db, user.id, ['bets', 'transactions', 'bankrolls', 'tipsters']);
             set({ bets: [], bankrolls: [], tipsters: [], transactions: [] });
             toast.success('Todos los datos han sido borrados de la nube.');
           } catch (e) {
@@ -296,39 +330,22 @@ export const useBetStore = create(
         const tipsters = (backup.tipsters || []).map(t => ({ ...t, user_id: userId }));
         const transactions = (backup.transactions || []).map(t => ({ ...t, user_id: userId }));
 
-        if (supabase && user) {
+        if (db && user) {
           set({ isLoading: true });
           try {
             // Delete current data first
-            await Promise.all([
-              supabase.from('bets').delete().eq('user_id', userId),
-              supabase.from('transactions').delete().eq('user_id', userId),
-              supabase.from('bankrolls').delete().eq('user_id', userId),
-              supabase.from('tipsters').delete().eq('user_id', userId)
-            ]);
+            await deleteUserCollections(db, userId, ['bets', 'transactions', 'bankrolls', 'tipsters']);
 
-            // Confirmed imports
-            if (tipsters.length > 0) {
-              const res = await supabase.from('tipsters').insert(tipsters);
-              if (res.error) throw res.error;
-            }
-            if (bankrolls.length > 0) {
-              const res = await supabase.from('bankrolls').insert(bankrolls);
-              if (res.error) throw res.error;
-            }
-            if (transactions.length > 0) {
-              const res = await supabase.from('transactions').insert(transactions);
-              if (res.error) throw res.error;
-            }
-            if (bets.length > 0) {
-              const res = await supabase.from('bets').insert(bets);
-              if (res.error) throw res.error;
-            }
+            // Confirmed batch imports
+            await batchInsertDocs(db, 'tipsters', tipsters);
+            await batchInsertDocs(db, 'bankrolls', bankrolls);
+            await batchInsertDocs(db, 'transactions', transactions);
+            await batchInsertDocs(db, 'bets', bets);
 
             await get().fetchCloudData(userId);
             toast.success('Copia de seguridad importada con éxito.');
           } catch (e) {
-            console.error('Error importing backup data to Supabase:', e);
+            console.error('Error importing backup data to Firestore:', e);
             toast.error(`Error al importar copia de seguridad: ${e.message}`);
           } finally {
             set({ isLoading: false });
@@ -353,19 +370,16 @@ export const useBetStore = create(
           status: betData.status || 'pending'
         };
 
-        if (supabase && user) {
+        if (db && user) {
           set({ isLoading: true });
           try {
-            const { data, error } = await supabase.from('bets').insert([newBet]).select();
-            if (error) throw error;
-            
-            const inserted = data[0];
-            set(state => ({ bets: [inserted, ...state.bets] }));
+            await setDoc(doc(db, 'bets', newBet.id), newBet);
+            set(state => ({ bets: [newBet, ...state.bets] }));
             toast.success('Apuesta creada con éxito.');
           } catch (e) {
-            console.error('Error adding bet to Supabase:', e);
+            console.error('Error adding bet to Firestore:', e);
             toast.error(`Error al crear apuesta: ${e.message}`);
-            throw e; // Propagate for react-hook-form handles
+            throw e;
           } finally {
             set({ isLoading: false });
           }
@@ -377,21 +391,16 @@ export const useBetStore = create(
       },
 
       updateBet: async (updatedBet) => {
-        if (supabase && get().user) {
+        if (db && get().user) {
           set({ isLoading: true });
           try {
-            const { error } = await supabase
-              .from('bets')
-              .update(updatedBet)
-              .eq('id', updatedBet.id);
-            if (error) throw error;
-            
+            await setDoc(doc(db, 'bets', updatedBet.id), updatedBet);
             set(state => ({
               bets: state.bets.map(b => b.id === updatedBet.id ? updatedBet : b)
             }));
             toast.success('Apuesta modificada con éxito.');
           } catch (e) {
-            console.error('Error updating bet on Supabase:', e);
+            console.error('Error updating bet on Firestore:', e);
             toast.error(`Error al modificar apuesta: ${e.message}`);
             throw e;
           } finally {
@@ -407,16 +416,14 @@ export const useBetStore = create(
       },
 
       deleteBet: async (id) => {
-        if (supabase && get().user) {
+        if (db && get().user) {
           set({ isLoading: true });
           try {
-            const { error } = await supabase.from('bets').delete().eq('id', id);
-            if (error) throw error;
-            
+            await deleteDoc(doc(db, 'bets', id));
             set(state => ({ bets: state.bets.filter(b => b.id !== id) }));
             toast.success('Apuesta eliminada.');
           } catch (e) {
-            console.error('Error deleting bet on Supabase:', e);
+            console.error('Error deleting bet on Firestore:', e);
             toast.error(`Error al borrar apuesta: ${e.message}`);
             throw e;
           } finally {
@@ -435,21 +442,16 @@ export const useBetStore = create(
         
         const updatedBet = { ...bet, status };
         
-        if (supabase && get().user) {
+        if (db && get().user) {
           set({ isLoading: true });
           try {
-            const { error } = await supabase
-              .from('bets')
-              .update({ status })
-              .eq('id', id);
-            if (error) throw error;
-            
+            await updateDoc(doc(db, 'bets', id), { status });
             set(state => ({
               bets: state.bets.map(b => b.id === id ? updatedBet : b)
             }));
             toast.success(`Apuesta liquidada como ${status.toUpperCase()}.`);
           } catch (e) {
-            console.error('Error settling bet on Supabase:', e);
+            console.error('Error settling bet on Firestore:', e);
             toast.error(`Error al liquidar apuesta: ${e.message}`);
             throw e;
           } finally {
@@ -476,17 +478,14 @@ export const useBetStore = create(
           initial_balance: Number(bankrollData.initial_balance) || 0
         };
 
-        if (supabase && user) {
+        if (db && user) {
           set({ isLoading: true });
           try {
-            const { data, error } = await supabase.from('bankrolls').insert([newBankroll]).select();
-            if (error) throw error;
-            
-            const inserted = data[0];
-            set(state => ({ bankrolls: [...state.bankrolls, inserted] }));
+            await setDoc(doc(db, 'bankrolls', newBankroll.id), newBankroll);
+            set(state => ({ bankrolls: [...state.bankrolls, newBankroll] }));
             toast.success('Banca creada con éxito.');
           } catch (e) {
-            console.error('Error adding bankroll to Supabase:', e);
+            console.error('Error adding bankroll to Firestore:', e);
             toast.error(`Error al crear banca: ${e.message}`);
             throw e;
           } finally {
@@ -505,21 +504,16 @@ export const useBetStore = create(
           initial_balance: Number(updatedBankroll.initial_balance) || 0
         };
 
-        if (supabase && get().user) {
+        if (db && get().user) {
           set({ isLoading: true });
           try {
-            const { error } = await supabase
-              .from('bankrolls')
-              .update(cleanBankroll)
-              .eq('id', cleanBankroll.id);
-            if (error) throw error;
-            
+            await setDoc(doc(db, 'bankrolls', cleanBankroll.id), cleanBankroll);
             set(state => ({
               bankrolls: state.bankrolls.map(b => b.id === cleanBankroll.id ? cleanBankroll : b)
             }));
             toast.success('Banca modificada con éxito.');
           } catch (e) {
-            console.error('Error updating bankroll on Supabase:', e);
+            console.error('Error updating bankroll on Firestore:', e);
             toast.error(`Error al modificar banca: ${e.message}`);
             throw e;
           } finally {
@@ -541,14 +535,21 @@ export const useBetStore = create(
           return;
         }
 
-        if (supabase && get().user) {
+        if (db && get().user) {
           set({ isLoading: true });
           try {
             // Delete associated transactions first
-            await supabase.from('transactions').delete().eq('bankroll_id', id);
+            const transRef = collection(db, 'transactions');
+            const q = query(transRef, where('bankroll_id', '==', id));
+            const querySnapshot = await getDocs(q);
+            const batch = writeBatch(db);
+            querySnapshot.forEach((docSnap) => {
+              batch.delete(docSnap.ref);
+            });
+            await batch.commit();
             
-            const { error } = await supabase.from('bankrolls').delete().eq('id', id);
-            if (error) throw error;
+            // Delete the bankroll
+            await deleteDoc(doc(db, 'bankrolls', id));
             
             set(state => ({
               bankrolls: state.bankrolls.filter(b => b.id !== id),
@@ -556,7 +557,7 @@ export const useBetStore = create(
             }));
             toast.success('Banca eliminada.');
           } catch (e) {
-            console.error('Error deleting bankroll on Supabase:', e);
+            console.error('Error deleting bankroll on Firestore:', e);
             toast.error(`Error al borrar banca: ${e.message}`);
             throw e;
           } finally {
@@ -583,17 +584,14 @@ export const useBetStore = create(
           user_id: userId
         };
 
-        if (supabase && user) {
+        if (db && user) {
           set({ isLoading: true });
           try {
-            const { data, error } = await supabase.from('tipsters').insert([newTipster]).select();
-            if (error) throw error;
-            
-            const inserted = data[0];
-            set(state => ({ tipsters: [...state.tipsters, inserted] }));
+            await setDoc(doc(db, 'tipsters', newTipster.id), newTipster);
+            set(state => ({ tipsters: [...state.tipsters, newTipster] }));
             toast.success('Tipster añadido con éxito.');
           } catch (e) {
-            console.error('Error adding tipster to Supabase:', e);
+            console.error('Error adding tipster to Firestore:', e);
             toast.error(`Error al añadir tipster: ${e.message}`);
             throw e;
           } finally {
@@ -607,21 +605,16 @@ export const useBetStore = create(
       },
 
       updateTipster: async (updatedTipster) => {
-        if (supabase && get().user) {
+        if (db && get().user) {
           set({ isLoading: true });
           try {
-            const { error } = await supabase
-              .from('tipsters')
-              .update(updatedTipster)
-              .eq('id', updatedTipster.id);
-            if (error) throw error;
-            
+            await setDoc(doc(db, 'tipsters', updatedTipster.id), updatedTipster);
             set(state => ({
               tipsters: state.tipsters.map(t => t.id === updatedTipster.id ? updatedTipster : t)
             }));
             toast.success('Tipster modificado con éxito.');
           } catch (e) {
-            console.error('Error updating tipster on Supabase:', e);
+            console.error('Error updating tipster on Firestore:', e);
             toast.error(`Error al modificar tipster: ${e.message}`);
             throw e;
           } finally {
@@ -637,17 +630,21 @@ export const useBetStore = create(
       },
 
       deleteTipster: async (id) => {
-        if (supabase && get().user) {
+        if (db && get().user) {
           set({ isLoading: true });
           try {
             // Nullify associated bets in cloud
-            await supabase
-              .from('bets')
-              .update({ tipster_id: null })
-              .eq('tipster_id', id);
+            const betsRef = collection(db, 'bets');
+            const q = query(betsRef, where('tipster_id', '==', id));
+            const querySnapshot = await getDocs(q);
+            const batch = writeBatch(db);
+            querySnapshot.forEach((docSnap) => {
+              batch.update(docSnap.ref, { tipster_id: null });
+            });
+            await batch.commit();
 
-            const { error } = await supabase.from('tipsters').delete().eq('id', id);
-            if (error) throw error;
+            // Delete the tipster
+            await deleteDoc(doc(db, 'tipsters', id));
             
             set(state => ({
               tipsters: state.tipsters.filter(t => t.id !== id),
@@ -655,7 +652,7 @@ export const useBetStore = create(
             }));
             toast.success('Tipster eliminado (apuestas desvinculadas).');
           } catch (e) {
-            console.error('Error deleting tipster on Supabase:', e);
+            console.error('Error deleting tipster on Firestore:', e);
             toast.error(`Error al eliminar tipster: ${e.message}`);
             throw e;
           } finally {
@@ -684,17 +681,14 @@ export const useBetStore = create(
           date: transData.date || new Date().toISOString().split('T')[0]
         };
 
-        if (supabase && user) {
+        if (db && user) {
           set({ isLoading: true });
           try {
-            const { data, error } = await supabase.from('transactions').insert([newTrans]).select();
-            if (error) throw error;
-            
-            const inserted = data[0];
-            set(state => ({ transactions: [...state.transactions, inserted] }));
+            await setDoc(doc(db, 'transactions', newTrans.id), newTrans);
+            set(state => ({ transactions: [...state.transactions, newTrans] }));
             toast.success('Transacción registrada con éxito.');
           } catch (e) {
-            console.error('Error adding transaction to Supabase:', e);
+            console.error('Error adding transaction to Firestore:', e);
             toast.error(`Error al registrar transacción: ${e.message}`);
             throw e;
           } finally {
