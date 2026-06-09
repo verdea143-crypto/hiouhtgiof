@@ -337,3 +337,89 @@ export const runMonteCarloSimulations = (initialCapital, stakeType, stakeValue, 
     pathsMetadata: selectedPaths
   };
 };
+
+/**
+ * Calculates the Max Drawdown retrospectively.
+ * @param {Array} bets 
+ * @param {number} initialBalance 
+ * @returns {Object}
+ */
+export const calculateMaxDrawdown = (bets, initialBalance = 1000) => {
+  const settledBets = bets
+    .filter(b => b.status === 'won' || b.status === 'lost' || b.status === 'void')
+    .sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  let currentBalance = initialBalance;
+  let runningPeak = initialBalance;
+  let maxDDPercent = 0;
+  let maxDDAbsolute = 0;
+
+  const balanceHistory = [{ balance: currentBalance, ddPercent: 0, date: 'Inicio' }];
+
+  settledBets.forEach(b => {
+    const profit = getBetProfit(b);
+    currentBalance += profit;
+
+    if (currentBalance > runningPeak) {
+      runningPeak = currentBalance;
+    }
+
+    const ddAbs = runningPeak - currentBalance;
+    const ddPct = runningPeak > 0 ? (ddAbs / runningPeak) * 100 : 0;
+
+    if (ddPct > maxDDPercent) {
+      maxDDPercent = ddPct;
+    }
+    if (ddAbs > maxDDAbsolute) {
+      maxDDAbsolute = ddAbs;
+    }
+
+    balanceHistory.push({
+      balance: Number(currentBalance.toFixed(2)),
+      ddPercent: Number(ddPct.toFixed(2)),
+      date: b.date.split('-').slice(1).join('/')
+    });
+  });
+
+  return {
+    maxDDPercent: Number(maxDDPercent.toFixed(2)),
+    maxDDAbsolute: Number(maxDDAbsolute.toFixed(2)),
+    balanceHistory
+  };
+};
+
+/**
+ * Calculates the Sharpe Ratio of betting returns.
+ * @param {Array} bets 
+ * @returns {number}
+ */
+export const calculateSharpeRatio = (bets) => {
+  const settledBets = bets.filter(b => b.status === 'won' || b.status === 'lost');
+  if (settledBets.length < 5) return 0;
+
+  const profits = settledBets.map(b => getBetProfit(b));
+  const mean = profits.reduce((sum, p) => sum + p, 0) / profits.length;
+  
+  const variance = profits.reduce((sum, p) => sum + Math.pow(p - mean, 2), 0) / profits.length;
+  const stdDev = Math.sqrt(variance);
+
+  if (stdDev === 0) return 0;
+  return Number((mean / stdDev).toFixed(2));
+};
+
+/**
+ * Calculates the Value at Risk (95% confidence level).
+ * @param {Array} bets 
+ * @returns {number}
+ */
+export const calculateVaR95 = (bets) => {
+  const settledBets = bets.filter(b => b.status === 'won' || b.status === 'lost');
+  if (settledBets.length < 10) return 0;
+
+  const profits = settledBets.map(b => getBetProfit(b)).sort((a, b) => a - b);
+  const index = Math.floor(profits.length * 0.05);
+  const varVal = profits[index];
+
+  return varVal < 0 ? Number(Math.abs(varVal).toFixed(2)) : 0;
+};
+

@@ -13,10 +13,21 @@ import {
   BarChart3,
   TrendingUp,
   Percent,
-  CheckCircle2
+  CheckCircle2,
+  FileText,
+  Printer
 } from 'lucide-react';
+import { 
+  PieChart, 
+  Pie, 
+  Cell, 
+  ResponsiveContainer, 
+  Tooltip as RechartsTooltip 
+} from 'recharts';
 import { useBetStore } from '../store/useBetStore';
 import { calculateStats } from '../utils/math';
+
+const COLORS = ['#10b981', '#3b82f6', '#8b5cf6', '#f59e0b', '#ef4444', '#ec4899'];
 
 // Validation Schema
 const tipsterSchema = z.object({
@@ -37,6 +48,46 @@ export const Tipsters = () => {
   // States
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingTipster, setEditingTipster] = useState(null);
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [selectedTipsterForReport, setSelectedTipsterForReport] = useState(null);
+
+  const handleOpenReport = (tipster) => {
+    setSelectedTipsterForReport(tipster);
+    setIsReportModalOpen(true);
+    setGlobalModalOpen(true);
+  };
+
+  const handleExportJSON = (tipster, stats) => {
+    const reportData = {
+      tipster: {
+        name: tipster.name,
+        description: tipster.description,
+        monthly_cost: tipster.monthly_cost
+      },
+      stats: {
+        netProfit: stats.netProfit,
+        yield: stats.yield,
+        winRate: stats.winRate,
+        wonCount: stats.wonCount,
+        lostCount: stats.lostCount,
+        voidCount: stats.voidCount,
+        totalBets: stats.settledCount + stats.pendingCount
+      },
+      generated_at: new Date().toISOString()
+    };
+
+    const blob = new Blob([JSON.stringify(reportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `informe-${tipster.name.toLowerCase().replace(/\s+/g, '-')}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handlePrintReport = () => {
+    window.print();
+  };
 
   // React Hook Form
   const { register, handleSubmit, formState: { errors }, reset } = useForm({
@@ -272,6 +323,15 @@ export const Tipsters = () => {
                     <td>
                       <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
                         <button 
+                          onClick={() => handleOpenReport(t)}
+                          className="btn-action-glass action-edit" 
+                          title="Informe de Rendimiento"
+                          aria-label="Informe de Rendimiento"
+                          style={{ color: 'var(--color-accent)' }}
+                        >
+                          <BarChart3 size={14} />
+                        </button>
+                        <button 
                           onClick={() => handleOpenEdit(t)}
                           className="btn-action-glass action-edit" 
                           title="Editar"
@@ -291,7 +351,7 @@ export const Tipsters = () => {
                 ))
               ) : (
                 <tr>
-                  <td colSpan={7} style={{ textAlign: 'center', padding: '32px', color: 'var(--color-text-muted)', fontSize: '14px' }}>
+                  <td colSpan={8} style={{ textAlign: 'center', padding: '32px', color: 'var(--color-text-muted)', fontSize: '14px' }}>
                     No tienes tipsters registrados. Registra tu primer tipster haciendo clic en "Nuevo Tipster".
                   </td>
                 </tr>
@@ -369,6 +429,191 @@ export const Tipsters = () => {
         </div>,
         document.body
       )}
+
+      {/* Tipster Audit Report Modal */}
+      {isReportModalOpen && selectedTipsterForReport && createPortal(
+        <div className="modal-overlay">
+          <div id="print-report-area" className="modal-content glass-panel" style={{ maxWidth: '650px', maxHeight: '95vh', overflowY: 'auto' }}>
+            {/* Header */}
+            <div className="flex-between no-print" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '14px', marginBottom: '20px' }}>
+              <h3 style={{ fontSize: '20px', fontWeight: 700, color: '#f3f4f6' }}>
+                Informe de Rendimiento: {selectedTipsterForReport.name}
+              </h3>
+              <button onClick={() => { setIsReportModalOpen(false); setGlobalModalOpen(false); }} className="btn-icon" style={{ border: 'none', background: 'transparent' }}>
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Print Title (Only shown in print layout) */}
+            <div className="print-only" style={{ display: 'none', marginBottom: '24px' }}>
+              <h2 style={{ fontSize: '24px', fontWeight: 800 }}>Informe de Auditoría Deportiva — BetFlow</h2>
+              <p style={{ fontSize: '14px', color: '#555' }}>Pronosticador: <strong>{selectedTipsterForReport.name}</strong></p>
+              <p style={{ fontSize: '12px', color: '#777' }}>Generado el: {new Date().toLocaleDateString('es-ES')}</p>
+            </div>
+
+            {/* Stats Summary Cards */}
+            {(() => {
+              const tBets = bets.filter(b => b.tipster_id === selectedTipsterForReport.id);
+              const stats = calculateStats(tBets);
+              
+              // Process Sports Data
+              const sportsMap = {};
+              tBets.forEach(b => {
+                sportsMap[b.sport] = (sportsMap[b.sport] || 0) + 1;
+              });
+              const sportsData = Object.keys(sportsMap).map(name => ({ name, value: sportsMap[name] }));
+
+              // Process Bookmaker Data
+              const bookiesMap = {};
+              tBets.forEach(b => {
+                bookiesMap[b.bookmaker] = (bookiesMap[b.bookmaker] || 0) + 1;
+              });
+              const bookiesData = Object.keys(bookiesMap).map(name => ({ name, value: bookiesMap[name] }));
+
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                  
+                  {/* KPI Row */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '14px' }}>
+                    <div style={{ padding: '12px', background: 'rgba(255,255,255,0.02)', borderRadius: '10px', border: '1px solid var(--border-glass)', textAlign: 'center' }}>
+                      <span style={{ fontSize: '11px', color: 'var(--color-text-secondary)', fontWeight: 600 }}>Beneficio Neto</span>
+                      <div style={{ fontSize: '18px', fontWeight: 800, color: stats.netProfit >= 0 ? 'var(--color-emerald)' : 'var(--color-crimson)', marginTop: '4px' }}>
+                        {stats.netProfit >= 0 ? '+' : ''}{stats.netProfit.toFixed(2)}€
+                      </div>
+                    </div>
+
+                    <div style={{ padding: '12px', background: 'rgba(255,255,255,0.02)', borderRadius: '10px', border: '1px solid var(--border-glass)', textAlign: 'center' }}>
+                      <span style={{ fontSize: '11px', color: 'var(--color-text-secondary)', fontWeight: 600 }}>Yield Promedio</span>
+                      <div style={{ fontSize: '18px', fontWeight: 800, color: stats.yield >= 0 ? 'var(--color-emerald)' : 'var(--color-crimson)', marginTop: '4px' }}>
+                        {stats.yield.toFixed(1)}%
+                      </div>
+                    </div>
+
+                    <div style={{ padding: '12px', background: 'rgba(255,255,255,0.02)', borderRadius: '10px', border: '1px solid var(--border-glass)', textAlign: 'center' }}>
+                      <span style={{ fontSize: '11px', color: 'var(--color-text-secondary)', fontWeight: 600 }}>Tasa de Acierto</span>
+                      <div style={{ fontSize: '18px', fontWeight: 800, color: '#f3f4f6', marginTop: '4px' }}>
+                        {stats.winRate.toFixed(1)}%
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Secondary Details Row */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '14px', fontSize: '13px', borderTop: '1px solid var(--border-glass)', paddingTop: '14px' }}>
+                    <div>
+                      <p style={{ color: 'var(--color-text-secondary)' }}>Apuestas Resueltas: <strong style={{ color: '#f3f4f6' }}>{stats.settledCount}</strong></p>
+                      <p style={{ color: 'var(--color-text-secondary)', marginTop: '4px' }}>Récord de Apuestas: <strong style={{ color: '#f3f4f6' }}>{stats.wonCount}G / {stats.lostCount}P / {stats.voidCount}N</strong></p>
+                    </div>
+                    <div>
+                      <p style={{ color: 'var(--color-text-secondary)' }}>Coste Mensual: <strong style={{ color: '#f3f4f6' }}>{selectedTipsterForReport.monthly_cost ? `${selectedTipsterForReport.monthly_cost.toFixed(2)}€` : 'Gratuito'}</strong></p>
+                      <p style={{ color: 'var(--color-text-secondary)', marginTop: '4px' }}>Descripción: <strong style={{ color: '#f3f4f6' }}>{selectedTipsterForReport.description || 'Sin descripción'}</strong></p>
+                    </div>
+                  </div>
+
+                  {/* Charts Grid */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', borderTop: '1px solid var(--border-glass)', paddingTop: '14px' }}>
+                    
+                    {/* Sport Pie */}
+                    <div style={{ textAlign: 'center' }}>
+                      <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--color-text-secondary)' }}>Distribución por Deporte</span>
+                      {sportsData.length > 0 ? (
+                        <div style={{ height: '140px', marginTop: '10px' }}>
+                          <ResponsiveContainer width="100%" height="100%">
+                            <PieChart>
+                              <Pie data={sportsData} dataKey="value" cx="50%" cy="50%" outerRadius={50} fill="var(--color-accent)">
+                                {sportsData.map((entry, index) => (
+                                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                ))}
+                              </Pie>
+                              <RechartsTooltip formatter={(value, name) => [`${value} apuestas`, name]} />
+                            </PieChart>
+                          </ResponsiveContainer>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', justifyContent: 'center', fontSize: '9px', marginTop: '6px' }}>
+                            {sportsData.map((entry, index) => (
+                              <span key={entry.name} style={{ color: COLORS[index % COLORS.length], fontWeight: 600 }}>● {entry.name}</span>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', height: '140px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Sin datos de deportes</div>
+                      )}
+                    </div>
+
+                    {/* Bookmaker Pie */}
+                    <div style={{ textAlign: 'center' }}>
+                      <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--color-text-secondary)' }}>Distribución por Casas</span>
+                      {bookiesData.length > 0 ? (
+                        <div style={{ height: '140px', marginTop: '10px' }}>
+                          <ResponsiveContainer width="100%" height="100%">
+                            <PieChart>
+                              <Pie data={bookiesData} dataKey="value" cx="50%" cy="50%" outerRadius={50} fill="var(--color-accent)">
+                                {bookiesData.map((entry, index) => (
+                                  <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                ))}
+                              </Pie>
+                              <RechartsTooltip formatter={(value, name) => [`${value} apuestas`, name]} />
+                            </PieChart>
+                          </ResponsiveContainer>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', justifyContent: 'center', fontSize: '9px', marginTop: '6px' }}>
+                            {bookiesData.map((entry, index) => (
+                              <span key={entry.name} style={{ color: COLORS[index % COLORS.length], fontWeight: 600 }}>● {entry.name}</span>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', height: '140px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Sin datos de casas</div>
+                      )}
+                    </div>
+
+                  </div>
+
+                  {/* Actions Section */}
+                  <div className="no-print" style={{ display: 'flex', gap: '12px', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '16px', justifyContent: 'flex-end', marginTop: '10px' }}>
+                    <button type="button" onClick={() => handleExportJSON(selectedTipsterForReport, stats)} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer' }}>
+                      <FileText size={14} />
+                      Exportar JSON
+                    </button>
+                    <button type="button" onClick={handlePrintReport} className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer' }}>
+                      <Printer size={14} />
+                      Imprimir / PDF
+                    </button>
+                  </div>
+
+                </div>
+              );
+            })()}
+
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Print Stylesheet */}
+      <style dangerouslySetInnerHTML={{__html: `
+        @media print {
+          body * {
+            visibility: hidden;
+          }
+          #print-report-area, #print-report-area * {
+            visibility: visible;
+          }
+          #print-report-area {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+            background: white !important;
+            color: black !important;
+            border: none !important;
+            box-shadow: none !important;
+          }
+          .no-print {
+            display: none !important;
+          }
+          .print-only {
+            display: block !important;
+          }
+        }
+      `}} />
 
     </div>
   );

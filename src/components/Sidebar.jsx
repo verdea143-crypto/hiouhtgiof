@@ -13,7 +13,8 @@ import {
   Menu,
   X,
   Sun,
-  Moon
+  Moon,
+  Zap
 } from 'lucide-react';
 import { useBetStore } from '../store/useBetStore';
 import { authService } from '../services/authService';
@@ -41,6 +42,7 @@ export const Sidebar = () => {
   const navItems = [
     { to: '/dashboard', label: 'Resumen', icon: LayoutDashboard },
     { to: '/bets', label: 'Apuestas', icon: Receipt },
+    { to: '/odds', label: 'Cuotas', icon: Zap },
     { to: '/calculators', label: 'Calculadoras', icon: Calculator },
   ];
 

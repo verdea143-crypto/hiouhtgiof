@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -40,6 +41,7 @@ const betSchema = z.object({
 });
 
 export const Bets = () => {
+  const location = useLocation();
   const bets = useBetStore(state => state.bets);
   const bankrolls = useBetStore(state => state.bankrolls);
   const tipsters = useBetStore(state => state.tipsters);
@@ -55,6 +57,30 @@ export const Bets = () => {
   // States
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingBet, setEditingBet] = useState(null);
+
+  // Prefill hook from Odds Portal
+  useEffect(() => {
+    if (location.state?.prefill) {
+      const { prefill } = location.state;
+      reset({
+        sport: prefill.deporte || '',
+        event: prefill.partido || '',
+        market: prefill.mercado || '',
+        odds: prefill.odds || '',
+        stake_percent: '',
+        bookmaker: prefill.casa || '',
+        date: new Date().toISOString().split('T')[0],
+        bankroll_id: bankrolls[0]?.id || '',
+        tipster_id: 'none',
+        status: 'pending'
+      });
+      setIsModalOpen(true);
+      setGlobalModalOpen(true);
+
+      // Clear the history state so it doesn't open the modal again on refresh
+      window.history.replaceState({}, document.title);
+    }
+  }, [location, reset, bankrolls, setGlobalModalOpen]);
 
   // Quick Calculator States
   const [isCalcOpen, setIsCalcOpen] = useState(false);

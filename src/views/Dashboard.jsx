@@ -24,7 +24,7 @@ import {
   Legend
 } from 'recharts';
 import { useBetStore } from '../store/useBetStore';
-import { calculateStats, getBetProfit } from '../utils/math';
+import { calculateStats, getBetProfit, calculateMaxDrawdown, calculateSharpeRatio, calculateVaR95 } from '../utils/math';
 import { CustomSelect } from '../components/CustomSelect';
 import { detectarRachaNegativa } from '../utils/rachaAlert';
 
@@ -163,6 +163,15 @@ export const Dashboard = () => {
     // Add baseline if empty
     return data.length > 0 ? [{ fecha: 'Inicio', Beneficio: 0 }, ...data] : [{ fecha: 'Inicio', Beneficio: 0 }];
   }, [filteredBets]);
+
+  // Risk & Drawdown calculations
+  const riskMetrics = useMemo(() => {
+    const initialCap = bankrolls.reduce((sum, b) => sum + (Number(b.initial_balance) || 0), 0) || 1000;
+    const ddResult = calculateMaxDrawdown(filteredBets, initialCap);
+    const sharpe = calculateSharpeRatio(filteredBets);
+    const var95 = calculateVaR95(filteredBets);
+    return { ...ddResult, sharpe, var95 };
+  }, [filteredBets, bankrolls]);
 
   // Chart Data: Sports distribution
   const sportsData = useMemo(() => {
@@ -1081,6 +1090,80 @@ export const Dashboard = () => {
         </>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }} className="animate-fade-in">
+          {/* Risk Metrics & Drawdown Chart Row */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '24px' }} className="grid-cols-mobile">
+            {/* Risk KPIs */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div className="glass-panel" style={{ padding: '20px', borderLeft: '4px solid var(--color-crimson)' }}>
+                <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-text-secondary)' }}>Máximo Drawdown</span>
+                <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--color-crimson)', marginTop: '4px' }}>
+                  -{riskMetrics.maxDDPercent}%
+                </div>
+                <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
+                  Pérdida máxima: {riskMetrics.maxDDAbsolute.toFixed(2)}€ desde pico
+                </span>
+              </div>
+
+              <div className="glass-panel" style={{ padding: '20px', borderLeft: '4px solid var(--color-accent)' }}>
+                <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-text-secondary)' }}>Ratio de Sharpe</span>
+                <div style={{ fontSize: '24px', fontWeight: 800, color: riskMetrics.sharpe >= 1 ? 'var(--color-emerald)' : (riskMetrics.sharpe > 0 ? 'var(--color-text-primary)' : 'var(--color-crimson)'), marginTop: '4px' }}>
+                  {riskMetrics.sharpe}
+                </div>
+                <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
+                  Rendimiento ajustado al riesgo (&gt;1.0 es excelente)
+                </span>
+              </div>
+
+              <div className="glass-panel" style={{ padding: '20px', borderLeft: '4px solid #f59e0b' }}>
+                <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-text-secondary)' }}>Valor en Riesgo (VaR 95%)</span>
+                <div style={{ fontSize: '24px', fontWeight: 800, color: '#f59e0b', marginTop: '4px' }}>
+                  {riskMetrics.var95.toFixed(2)}€
+                </div>
+                <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
+                  Pérdida máxima esperada por apuesta (95% confianza)
+                </span>
+              </div>
+            </div>
+
+            {/* Drawdown AreaChart */}
+            <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <span style={{ fontSize: '14px', fontWeight: 700, color: '#f3f4f6' }}>Curva de Drawdown Histórico (%)</span>
+              <div style={{ height: '220px', width: '100%' }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={riskMetrics.balanceHistory} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
+                    <defs>
+                      <linearGradient id="colorDrawdown" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="var(--color-crimson)" stopOpacity={0.2}/>
+                        <stop offset="95%" stopColor="var(--color-crimson)" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <XAxis dataKey="date" stroke="var(--color-text-muted)" fontSize={10} tickLine={false} />
+                    <YAxis stroke="var(--color-text-muted)" fontSize={10} tickLine={false} tickFormatter={(val) => `-${val}%`} reversed={true} />
+                    <Tooltip 
+                      contentStyle={{ 
+                        background: 'rgba(17, 24, 39, 0.9)', 
+                        border: '1px solid var(--border-glass)',
+                        borderRadius: '10px',
+                        color: '#fff',
+                        fontSize: '11px'
+                      }}
+                      formatter={(value) => [`-${value}%`, 'Drawdown']}
+                    />
+                    <Area 
+                      type="monotone" 
+                      dataKey="ddPercent" 
+                      stroke="var(--color-crimson)" 
+                      strokeWidth={1.5}
+                      fillOpacity={1} 
+                      fill="url(#colorDrawdown)"
+                      isAnimationActive={false}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </div>
+
           {/* Rachas & Records Grid */}
           <div className="grid-cols-4">
             {/* Racha Activa */}
@@ -1272,7 +1355,7 @@ export const Dashboard = () => {
 
       <style dangerouslySetInnerHTML={{__html: `
         @media (max-width: 1024px) {
-          .grid-cols-3 {
+          .grid-cols-3, .grid-cols-mobile {
             grid-template-columns: 1fr !important;
           }
         }

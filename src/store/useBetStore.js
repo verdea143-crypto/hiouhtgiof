@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware';
 import { toast } from 'sonner';
 import { db } from '../db/firebaseClient';
 import { authService } from '../services/authService';
+import { scheduleBetReminder } from '../utils/notifications';
 import {
   collection,
   getDocs,
@@ -70,6 +71,7 @@ export const useBetStore = create(
       isModalOpen: false,
       themeAccent: 'emerald',
       taxRate: 0,
+      goals: [],
 
       // Helper Getters (Selectors)
       isCloudActive: () => db !== null,
@@ -141,7 +143,7 @@ export const useBetStore = create(
         if (!db) return;
         set({ isLoading: true });
         try {
-          const collections = ['bets', 'bankrolls', 'tipsters', 'transactions'];
+          const collections = ['bets', 'bankrolls', 'tipsters', 'transactions', 'goals'];
           const fetchPromises = collections.map(async (colName) => {
             const colRef = collection(db, colName);
             const q = query(colRef, where('user_id', '==', userId));
@@ -178,7 +180,8 @@ export const useBetStore = create(
             bets: [],
             bankrolls: [],
             tipsters: [],
-            transactions: []
+            transactions: [],
+            goals: []
           });
         }
       },
@@ -307,8 +310,8 @@ export const useBetStore = create(
         if (db && user) {
           set({ isLoading: true });
           try {
-            await deleteUserCollections(db, user.uid || user.id, ['bets', 'transactions', 'bankrolls', 'tipsters']);
-            set({ bets: [], bankrolls: [], tipsters: [], transactions: [] });
+            await deleteUserCollections(db, user.uid || user.id, ['bets', 'transactions', 'bankrolls', 'tipsters', 'goals']);
+            set({ bets: [], bankrolls: [], tipsters: [], transactions: [], goals: [] });
             toast.success('Todos los datos han sido borrados de la nube.');
           } catch (e) {
             console.error('Error clearing data:', e);
@@ -318,7 +321,7 @@ export const useBetStore = create(
           }
         } else {
           // Local Mode
-          set({ bets: [], bankrolls: [], tipsters: [], transactions: [] });
+          set({ bets: [], bankrolls: [], tipsters: [], transactions: [], goals: [] });
           toast.success('Todos los datos locales han sido borrados.');
         }
       },
@@ -332,17 +335,19 @@ export const useBetStore = create(
         const bankrolls = (backup.bankrolls || []).map(b => ({ ...b, user_id: userId }));
         const tipsters = (backup.tipsters || []).map(t => ({ ...t, user_id: userId }));
         const transactions = (backup.transactions || []).map(t => ({ ...t, user_id: userId }));
+        const goals = (backup.goals || []).map(g => ({ ...g, user_id: userId }));
 
         if (db && user) {
           set({ isLoading: true });
           try {
             // Delete current data first
-            await deleteUserCollections(db, userId, ['bets', 'transactions', 'bankrolls', 'tipsters']);
+            await deleteUserCollections(db, userId, ['bets', 'transactions', 'bankrolls', 'tipsters', 'goals']);
 
             // Confirmed batch imports
             await batchInsertDocs(db, 'tipsters', tipsters);
             await batchInsertDocs(db, 'bankrolls', bankrolls);
             await batchInsertDocs(db, 'transactions', transactions);
+            await batchInsertDocs(db, 'goals', goals);
             await batchInsertDocs(db, 'bets', bets);
 
             await get().fetchCloudData(userId);
@@ -355,7 +360,7 @@ export const useBetStore = create(
           }
         } else {
           // Local Mode
-          set({ bets, bankrolls, tipsters, transactions });
+          set({ bets, bankrolls, tipsters, transactions, goals });
           toast.success('Copia de seguridad importada localmente.');
         }
       },
@@ -379,6 +384,10 @@ export const useBetStore = create(
             await setDoc(doc(db, 'bets', newBet.id), newBet);
             set(state => ({ bets: [newBet, ...state.bets] }));
             toast.success('Apuesta creada con éxito.');
+            if (newBet.status === 'pending') {
+              const stakeDisplay = newBet.stake_percent ? `${newBet.stake_units || 0}u (${Number(newBet.stake).toFixed(2)}€)` : `${Number(newBet.stake).toFixed(2)}€`;
+              scheduleBetReminder(newBet.id, newBet.partido || 'Evento', stakeDisplay, newBet.date);
+            }
           } catch (e) {
             console.error('Error adding bet to Firestore:', e);
             toast.error(`Error al crear apuesta: ${e.message}`);
@@ -390,6 +399,10 @@ export const useBetStore = create(
           // Local Mode
           set(state => ({ bets: [newBet, ...state.bets] }));
           toast.success('Apuesta creada localmente.');
+          if (newBet.status === 'pending') {
+            const stakeDisplay = newBet.stake_percent ? `${newBet.stake_units || 0}u (${Number(newBet.stake).toFixed(2)}€)` : `${Number(newBet.stake).toFixed(2)}€`;
+            scheduleBetReminder(newBet.id, newBet.partido || 'Evento', stakeDisplay, newBet.date);
+          }
         }
       },
 
@@ -576,6 +589,96 @@ export const useBetStore = create(
         }
       },
 
+      // Goals Mutations
+      addGoal: async (goalData) => {
+        const { user } = get();
+        const userId = user ? (user.uid || user.id) : 'local_user';
+        
+        const newGoal = {
+          ...goalData,
+          id: generateId('goal'),
+          user_id: userId,
+          target_amount: Number(goalData.target_amount) || 0,
+          current_amount: Number(goalData.current_amount) || 0,
+          created_at: new Date().toISOString()
+        };
+
+        if (db && user) {
+          set({ isLoading: true });
+          try {
+            await setDoc(doc(db, 'goals', newGoal.id), newGoal);
+            set(state => ({ goals: [...state.goals, newGoal] }));
+            toast.success('Meta creada con éxito.');
+          } catch (e) {
+            console.error('Error adding goal to Firestore:', e);
+            toast.error(`Error al crear la meta: ${e.message}`);
+            throw e;
+          } finally {
+            set({ isLoading: false });
+          }
+        } else {
+          // Local Mode
+          set(state => ({ goals: [...state.goals, newGoal] }));
+          toast.success('Meta creada localmente.');
+        }
+      },
+
+      updateGoal: async (updatedGoal) => {
+        const cleanGoal = {
+          ...updatedGoal,
+          target_amount: Number(updatedGoal.target_amount) || 0,
+          current_amount: Number(updatedGoal.current_amount) || 0
+        };
+
+        if (db && get().user) {
+          set({ isLoading: true });
+          try {
+            await setDoc(doc(db, 'goals', cleanGoal.id), cleanGoal);
+            set(state => ({
+              goals: state.goals.map(g => g.id === cleanGoal.id ? cleanGoal : g)
+            }));
+            toast.success('Meta actualizada con éxito.');
+          } catch (e) {
+            console.error('Error updating goal on Firestore:', e);
+            toast.error(`Error al modificar la meta: ${e.message}`);
+            throw e;
+          } finally {
+            set({ isLoading: false });
+          }
+        } else {
+          // Local Mode
+          set(state => ({
+            goals: state.goals.map(g => g.id === cleanGoal.id ? cleanGoal : g)
+          }));
+          toast.success('Meta modificada localmente.');
+        }
+      },
+
+      deleteGoal: async (id) => {
+        if (db && get().user) {
+          set({ isLoading: true });
+          try {
+            await deleteDoc(doc(db, 'goals', id));
+            set(state => ({
+              goals: state.goals.filter(g => g.id !== id)
+            }));
+            toast.success('Meta eliminada.');
+          } catch (e) {
+            console.error('Error deleting goal on Firestore:', e);
+            toast.error(`Error al borrar la meta: ${e.message}`);
+            throw e;
+          } finally {
+            set({ isLoading: false });
+          }
+        } else {
+          // Local Mode
+          set(state => ({
+            goals: state.goals.filter(g => g.id !== id)
+          }));
+          toast.success('Meta eliminada localmente.');
+        }
+      },
+
       // Tipsters Mutations
       addTipster: async (tipsterData) => {
         const { user } = get();
@@ -753,7 +856,8 @@ export const useBetStore = create(
         tipsters: state.tipsters,
         transactions: state.transactions,
         themeAccent: state.themeAccent,
-        taxRate: state.taxRate
+        taxRate: state.taxRate,
+        goals: state.goals
       })
     }
   )

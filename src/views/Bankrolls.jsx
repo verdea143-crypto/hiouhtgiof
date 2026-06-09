@@ -43,10 +43,19 @@ const transactionSchema = z.object({
   description: z.string().optional().nullable()
 });
 
+const goalSchema = z.object({
+  title: z.string().min(1, 'El título es requerido'),
+  target_amount: z.preprocess((val) => val === '' ? undefined : Number(val), z.number({ invalid_type_error: 'El objetivo debe ser un número' }).gt(0, 'El objetivo debe ser mayor a 0€')),
+  target_date: z.string().min(1, 'La fecha límite es requerida')
+});
+
 export const Bankrolls = () => {
   const bankrolls = useBetStore(state => state.bankrolls);
   const bets = useBetStore(state => state.bets);
   const transactions = useBetStore(state => state.transactions);
+  const goals = useBetStore(state => state.goals || []);
+  const addGoal = useBetStore(state => state.addGoal);
+  const deleteGoal = useBetStore(state => state.deleteGoal);
 
   const getBankrollChartData = (bankrollId, initialBalance) => {
     const brBets = bets.filter(b => b.bankroll_id === bankrollId);
@@ -108,12 +117,41 @@ export const Bankrolls = () => {
   const addTransaction = useBetStore(state => state.addTransaction);
   const setIsModalOpen = useBetStore(state => state.setIsModalOpen);
 
-  // States
-  const [isBankrollModalOpen, setIsBankrollModalOpen] = useState(false);
-  const [editingBankroll, setEditingBankroll] = useState(null);
-  
-  const [isTransModalOpen, setIsTransModalOpen] = useState(false);
-  const [selectedBankrollForTrans, setSelectedBankrollForTrans] = useState('');
+  // React Hook Form for Goals
+  const { register: regGoal, handleSubmit: handleSubGoal, reset: resetGoal, formState: { errors: errGoal } } = useForm({
+    resolver: zodResolver(goalSchema),
+    defaultValues: {
+      title: '',
+      target_amount: '',
+      target_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+    }
+  });
+
+  const handleOpenGoalModal = (bankrollId) => {
+    setSelectedBankrollForGoal(bankrollId);
+    resetGoal({
+      title: '',
+      target_amount: '',
+      target_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+    });
+    setIsGoalModalOpen(true);
+    setIsModalOpen(true);
+  };
+
+  const handleGoalSubmitDetails = async (data) => {
+    try {
+      await addGoal({
+        bankroll_id: selectedBankrollForGoal,
+        title: data.title,
+        target_amount: Number(data.target_amount),
+        target_date: data.target_date
+      });
+      setIsGoalModalOpen(false);
+      setIsModalOpen(false);
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   // React Hook Form for Bankroll
   const { register: regBankroll, handleSubmit: handleSubBankroll, formState: { errors: errBankroll }, reset: resetBankroll } = useForm({
@@ -246,144 +284,306 @@ export const Bankrolls = () => {
       {/* Cards Grid */}
       {bankrollDataList.length > 0 ? (
         <div className="grid-cols-2 animate-fade-in" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '24px' }}>
-          {bankrollDataList.map(br => (
-            <div key={br.id} className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '18px', position: 'relative' }}>
-              
-              {/* Card Header */}
-              <div className="flex-between">
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <div style={{
-                    width: '40px',
-                    height: '40px',
-                    borderRadius: '10px',
-                    backgroundColor: 'rgba(16, 185, 129, 0.08)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: 'var(--color-emerald)',
-                    border: '1px solid rgba(16, 185, 129, 0.15)'
-                  }}>
-                    <Wallet size={20} />
+          {bankrollDataList.map(br => {
+            // Calculate Golden Streak for this bankroll
+            const brBets = bets.filter(b => b.bankroll_id === br.id && b.status !== 'pending' && b.status !== 'void').sort((a,b) => new Date(a.date) - new Date(b.date));
+            let maxStreak = 0;
+            let currStreak = 0;
+            brBets.forEach(b => {
+              if (b.status === 'won') {
+                currStreak++;
+                if (currStreak > maxStreak) maxStreak = currStreak;
+              } else {
+                currStreak = 0;
+              }
+            });
+            const hasGoldenStreak = maxStreak >= 5;
+
+            // Calculate Yield Master
+            const hasYieldMaster = br.stats.yield >= 15 && br.stats.settledCount >= 15;
+
+            // Calculate Max Drawdown for Hitos
+            const chartData = getBankrollChartData(br.id, br.initial_balance);
+            let maxBal = 0;
+            let maxDD = 0;
+            chartData.forEach(pt => {
+              const bal = pt.balance;
+              if (bal > maxBal) maxBal = bal;
+              if (maxBal > 0) {
+                const dd = ((maxBal - bal) / maxBal) * 100;
+                if (dd > maxDD) maxDD = dd;
+              }
+            });
+            const hasRiskControl = br.stats.settledCount >= 10 && maxDD <= 5;
+
+            // Active Goal
+            const activeGoal = goals.find(g => g.bankroll_id === br.id);
+            const progressPercent = activeGoal 
+              ? Math.min(100, Math.max(0, (br.stats.netProfit / activeGoal.target_amount) * 100))
+              : 0;
+
+            const daysLeft = activeGoal 
+              ? Math.ceil((new Date(activeGoal.target_date) - Date.now()) / (1000 * 60 * 60 * 24))
+              : 0;
+            const daysText = activeGoal
+              ? (daysLeft > 0 ? `Quedan ${daysLeft} días` : (daysLeft === 0 ? 'Hoy vence' : 'Vencido'))
+              : '';
+
+            // Est days to goal
+            const daysActive = activeGoal
+              ? Math.max(1, Math.round((Date.now() - new Date(activeGoal.created_at || br.id.split('_')[1] || Date.now()).getTime()) / (1000 * 60 * 60 * 24)))
+              : 1;
+            const avgDailyProfit = activeGoal ? br.stats.netProfit / daysActive : 0;
+            const remainingAmt = activeGoal ? activeGoal.target_amount - br.stats.netProfit : 0;
+            const estDaysToGoal = activeGoal && avgDailyProfit > 0 && remainingAmt > 0 ? Math.ceil(remainingAmt / avgDailyProfit) : null;
+
+            return (
+              <div key={br.id} className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '18px', position: 'relative' }}>
+                
+                {/* Card Header */}
+                <div className="flex-between">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div style={{
+                      width: '40px',
+                      height: '40px',
+                      borderRadius: '10px',
+                      backgroundColor: 'rgba(16, 185, 129, 0.08)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: 'var(--color-accent)',
+                      border: '1px solid var(--border-glass-active)'
+                    }}>
+                      <Wallet size={20} />
+                    </div>
+                    <div>
+                      <h3 style={{ fontSize: '18px', fontWeight: 700, color: '#f3f4f6' }}>{br.name}</h3>
+                      <p style={{ color: 'var(--color-text-secondary)', fontSize: '12px' }}>{br.description || 'Sin descripción'}</p>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button 
+                      onClick={() => handleOpenEditBankroll(br)}
+                      className="btn-action-glass action-edit" 
+                      title="Editar Banca"
+                    >
+                      <Edit2 size={14} />
+                    </button>
+                    <button 
+                      onClick={() => handleDeleteBankroll(br.id)}
+                      className="btn-action-glass action-delete" 
+                      title="Eliminar Banca"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Balances Display */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', padding: '16px', background: 'rgba(255, 255, 255, 0.02)', borderRadius: '12px', border: '1px solid var(--border-glass)' }}>
+                  <div>
+                    <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Saldo Disponible</span>
+                    <div style={{ fontSize: '24px', fontWeight: 800, color: br.currentBalance >= br.initial_balance ? '#10b981' : '#ef4444' }}>
+                      {br.currentBalance.toFixed(2)}€
+                    </div>
                   </div>
                   <div>
-                    <h3 style={{ fontSize: '18px', fontWeight: 700, color: '#f3f4f6' }}>{br.name}</h3>
-                    <p style={{ color: 'var(--color-text-secondary)', fontSize: '12px' }}>{br.description || 'Sin descripción'}</p>
+                    <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Saldo Inicial</span>
+                    <div style={{ fontSize: '24px', fontWeight: 800, color: '#f3f4f6' }}>
+                      {Number(br.initial_balance).toFixed(2)}€
+                    </div>
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', gap: '8px' }}>
+                {/* Evolution Chart */}
+                <div style={{ height: '110px', width: '100%', margin: '4px 0' }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={chartData} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
+                      <defs>
+                        <linearGradient id={`colorBalance-${br.id}`} x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="var(--color-accent)" stopOpacity={0.15}/>
+                          <stop offset="95%" stopColor="var(--color-accent)" stopOpacity={0}/>
+                        </linearGradient>
+                      </defs>
+                      <XAxis dataKey="date" hide={true} />
+                      <YAxis hide={true} domain={['dataMin - 50', 'dataMax + 50']} />
+                      <Tooltip 
+                        contentStyle={{ 
+                          background: 'rgba(17, 24, 39, 0.85)', 
+                          border: '1px solid var(--border-glass)',
+                          borderRadius: '8px',
+                          color: '#fff',
+                          fontSize: '11px',
+                          padding: '6px 10px'
+                        }}
+                        formatter={(value) => [`${value.toFixed(2)}€`, 'Saldo']}
+                      />
+                      <Area 
+                        type="monotone" 
+                        dataKey="balance" 
+                        stroke="var(--color-accent)" 
+                        strokeWidth={1.5}
+                        fillOpacity={1} 
+                        fill={`url(#colorBalance-${br.id})`} 
+                        isAnimationActive={false}
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+
+                {/* Stats Grid */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', textAlign: 'center' }}>
+                  <div style={{ padding: '8px', background: 'rgba(255,255,255,0.01)', borderRadius: '8px' }}>
+                    <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', fontWeight: 600 }}>Rentabilidad</span>
+                    <div style={{ fontSize: '15px', fontWeight: 700, color: br.stats.netProfit >= 0 ? 'var(--color-emerald)' : 'var(--color-crimson)', display: 'flex', alignItems: 'center', justifySelf: 'center', gap: '4px' }}>
+                      {br.stats.netProfit >= 0 ? <ArrowUpRight size={14} style={{ color: 'var(--color-emerald)' }} /> : <ArrowDownRight size={14} style={{ color: 'var(--color-crimson)' }} />}
+                      {br.profitPercent.toFixed(1)}%
+                    </div>
+                  </div>
+
+                  <div style={{ padding: '8px', background: 'rgba(255,255,255,0.01)', borderRadius: '8px' }}>
+                    <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', fontWeight: 600 }}>Yield</span>
+                    <div style={{ fontSize: '15px', fontWeight: 700, color: br.stats.yield >= 0 ? 'var(--color-emerald)' : 'var(--color-crimson)' }}>
+                      {br.stats.yield.toFixed(1)}%
+                    </div>
+                  </div>
+
+                  <div style={{ padding: '8px', background: 'rgba(255,255,255,0.01)', borderRadius: '8px' }}>
+                    <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', fontWeight: 600 }}>Apuestas</span>
+                    <div style={{ fontSize: '15px', fontWeight: 700, color: '#f3f4f6' }}>
+                      {br.stats.settledCount + br.stats.pendingCount}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Active Goal or Define Goal Button */}
+                {activeGoal ? (
+                  <div style={{ padding: '12px', background: 'rgba(255, 255, 255, 0.01)', borderRadius: '10px', border: '1px solid var(--border-glass)' }}>
+                    <div className="flex-between" style={{ marginBottom: '6px' }}>
+                      <span style={{ fontSize: '11px', color: 'var(--color-text-secondary)', fontWeight: 700, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        🎯 Meta: {activeGoal.title}
+                      </span>
+                      <button 
+                        onClick={() => deleteGoal(activeGoal.id)}
+                        title="Eliminar meta"
+                        aria-label="Eliminar meta"
+                        style={{ border: 'none', background: 'transparent', color: 'var(--color-crimson)', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center' }}
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                    
+                    {/* Progress Bar */}
+                    <div style={{ width: '100%', height: '8px', borderRadius: '4px', backgroundColor: 'rgba(255,255,255,0.03)', overflow: 'hidden', border: '1px solid var(--border-glass)', marginBottom: '6px' }}>
+                      <div style={{ width: `${progressPercent}%`, height: '100%', backgroundColor: 'var(--color-accent)', borderRadius: '4px', boxShadow: 'var(--shadow-glow)', transition: 'width 0.4s ease' }} />
+                    </div>
+                    
+                    <div className="flex-between" style={{ fontSize: '11px', color: 'var(--color-text-secondary)' }}>
+                      <span>{br.stats.netProfit.toFixed(2)}€ / {activeGoal.target_amount.toFixed(2)}€ ({progressPercent.toFixed(1)}%)</span>
+                      <span style={{ fontWeight: 600, color: daysLeft > 0 ? 'var(--color-accent)' : 'var(--color-crimson)' }}>
+                        {daysText} {estDaysToGoal !== null ? `(Est. ${estDaysToGoal}d)` : ''}
+                      </span>
+                    </div>
+                  </div>
+                ) : (
                   <button 
-                    onClick={() => handleOpenEditBankroll(br)}
-                    className="btn-action-glass action-edit" 
-                    title="Editar Banca"
+                    onClick={() => handleOpenGoalModal(br.id)}
+                    className="btn btn-secondary"
+                    style={{ width: '100%', fontSize: '11px', padding: '8px', borderStyle: 'dashed', borderColor: 'var(--border-glass-active)', background: 'rgba(16, 185, 129, 0.02)', color: 'var(--color-accent)', cursor: 'pointer', fontWeight: 600 }}
                   >
-                    <Edit2 size={14} />
+                    🎯 Definir Meta de Rendimiento
                   </button>
+                )}
+
+                {/* Milestones / Hitos Badge Grid */}
+                <div style={{ borderTop: '1px solid var(--border-glass)', paddingTop: '12px' }}>
+                  <span style={{ fontSize: '11px', color: 'var(--color-text-secondary)', fontWeight: 700, textTransform: 'uppercase', display: 'block', marginBottom: '8px' }}>Hitos de Banca</span>
+                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                    {/* Duplicada */}
+                    <div style={{
+                      padding: '4px 8px',
+                      borderRadius: '20px',
+                      fontSize: '10px',
+                      fontWeight: 600,
+                      backgroundColor: br.stats.netProfit >= br.initial_balance && br.initial_balance > 0 ? 'rgba(16, 185, 129, 0.08)' : 'rgba(255,255,255,0.02)',
+                      border: `1px solid ${br.stats.netProfit >= br.initial_balance && br.initial_balance > 0 ? 'rgba(16, 185, 129, 0.25)' : 'rgba(255,255,255,0.04)'}`,
+                      color: br.stats.netProfit >= br.initial_balance && br.initial_balance > 0 ? '#10b981' : 'var(--color-text-muted)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      opacity: br.stats.netProfit >= br.initial_balance && br.initial_balance > 0 ? 1 : 0.4
+                    }} title={br.stats.netProfit >= br.initial_balance && br.initial_balance > 0 ? '¡Has duplicado tu saldo inicial!' : 'Duplica tu saldo inicial para desbloquear'}>
+                      <span>🏆</span> Duplicada
+                    </div>
+
+                    {/* Racha Dorada */}
+                    <div style={{
+                      padding: '4px 8px',
+                      borderRadius: '20px',
+                      fontSize: '10px',
+                      fontWeight: 600,
+                      backgroundColor: hasGoldenStreak ? 'rgba(245, 158, 11, 0.08)' : 'rgba(255,255,255,0.02)',
+                      border: `1px solid ${hasGoldenStreak ? 'rgba(245, 158, 11, 0.25)' : 'rgba(255,255,255,0.04)'}`,
+                      color: hasGoldenStreak ? '#f59e0b' : 'var(--color-text-muted)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      opacity: hasGoldenStreak ? 1 : 0.4
+                    }} title={hasGoldenStreak ? '¡5 o más victorias consecutivas en esta banca!' : 'Logra una racha de 5 victorias para desbloquear'}>
+                      <span>🔥</span> Racha Dorada
+                    </div>
+
+                    {/* Yield Maestro */}
+                    <div style={{
+                      padding: '4px 8px',
+                      borderRadius: '20px',
+                      fontSize: '10px',
+                      fontWeight: 600,
+                      backgroundColor: hasYieldMaster ? 'rgba(139, 92, 246, 0.08)' : 'rgba(255,255,255,0.02)',
+                      border: `1px solid ${hasYieldMaster ? 'rgba(139, 92, 246, 0.25)' : 'rgba(255,255,255,0.04)'}`,
+                      color: hasYieldMaster ? '#a78bfa' : 'var(--color-text-muted)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      opacity: hasYieldMaster ? 1 : 0.4
+                    }} title={hasYieldMaster ? '¡Yield superior al 15% con al menos 15 apuestas resueltas!' : 'Mantén un Yield > 15% con 15+ apuestas resueltas'}>
+                      <span>💡</span> Yield Maestro
+                    </div>
+
+                    {/* Control de Riesgo */}
+                    <div style={{
+                      padding: '4px 8px',
+                      borderRadius: '20px',
+                      fontSize: '10px',
+                      fontWeight: 600,
+                      backgroundColor: hasRiskControl ? 'rgba(59, 130, 246, 0.08)' : 'rgba(255,255,255,0.02)',
+                      border: `1px solid ${hasRiskControl ? 'rgba(59, 130, 246, 0.25)' : 'rgba(255,255,255,0.04)'}`,
+                      color: hasRiskControl ? '#3b82f6' : 'var(--color-text-muted)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      opacity: hasRiskControl ? 1 : 0.4
+                    }} title={hasRiskControl ? '¡Mantuviste tu drawdown máximo inferior al 5% en 10+ apuestas!' : 'Mantén tu Drawdown Máximo <= 5% con 10+ apuestas resueltas'}>
+                      <span>🛡️</span> Risk Control
+                    </div>
+                  </div>
+                </div>
+
+                {/* Card Footer Actions */}
+                <div style={{ display: 'flex', gap: '10px', marginTop: '4px' }}>
                   <button 
-                    onClick={() => handleDeleteBankroll(br.id)}
-                    className="btn-action-glass action-delete" 
-                    title="Eliminar Banca"
+                    onClick={() => handleOpenTransaction(br.id)}
+                    className="btn btn-secondary"
+                    style={{ width: '100%', fontSize: '13px', padding: '8px 12px' }}
                   >
-                    <Trash2 size={14} />
+                    Registrar Depósito / Retiro
                   </button>
                 </div>
+
               </div>
-
-              {/* Balances Display */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', padding: '16px', background: 'rgba(255, 255, 255, 0.02)', borderRadius: '12px', border: '1px solid var(--border-glass)' }}>
-                <div>
-                  <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Saldo Disponible</span>
-                  <div style={{ fontSize: '24px', fontWeight: 800, color: br.currentBalance >= br.initial_balance ? '#10b981' : '#ef4444' }}>
-                    {br.currentBalance.toFixed(2)}€
-                  </div>
-                </div>
-                <div>
-                  <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Saldo Inicial</span>
-                  <div style={{ fontSize: '24px', fontWeight: 800, color: '#f3f4f6' }}>
-                    {Number(br.initial_balance).toFixed(2)}€
-                  </div>
-                </div>
-              </div>
-
-              {/* Evolution Chart */}
-              {(() => {
-                const chartData = getBankrollChartData(br.id, br.initial_balance);
-                return (
-                  <div style={{ height: '110px', width: '100%', margin: '4px 0' }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={chartData} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
-                        <defs>
-                          <linearGradient id={`colorBalance-${br.id}`} x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="var(--color-accent)" stopOpacity={0.15}/>
-                            <stop offset="95%" stopColor="var(--color-accent)" stopOpacity={0}/>
-                          </linearGradient>
-                        </defs>
-                        <XAxis dataKey="date" hide={true} />
-                        <YAxis hide={true} domain={['dataMin - 50', 'dataMax + 50']} />
-                        <Tooltip 
-                          contentStyle={{ 
-                            background: 'rgba(17, 24, 39, 0.85)', 
-                            border: '1px solid var(--border-glass)',
-                            borderRadius: '8px',
-                            color: '#fff',
-                            fontSize: '11px',
-                            padding: '6px 10px'
-                          }}
-                          formatter={(value) => [`${value.toFixed(2)}€`, 'Saldo']}
-                        />
-                        <Area 
-                          type="monotone" 
-                          dataKey="balance" 
-                          stroke="var(--color-accent)" 
-                          strokeWidth={1.5}
-                          fillOpacity={1} 
-                          fill={`url(#colorBalance-${br.id})`} 
-                          isAnimationActive={false}
-                        />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  </div>
-                );
-              })()}
-
-              {/* Stats Grid */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', textAlign: 'center' }}>
-                <div style={{ padding: '8px', background: 'rgba(255,255,255,0.01)', borderRadius: '8px' }}>
-                  <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', fontWeight: 600 }}>Rentabilidad</span>
-                  <div style={{ fontSize: '15px', fontWeight: 700, color: br.stats.netProfit >= 0 ? 'var(--color-emerald)' : 'var(--color-crimson)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
-                    {br.stats.netProfit >= 0 ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}
-                    {br.profitPercent.toFixed(1)}%
-                  </div>
-                </div>
-
-                <div style={{ padding: '8px', background: 'rgba(255,255,255,0.01)', borderRadius: '8px' }}>
-                  <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', fontWeight: 600 }}>Yield</span>
-                  <div style={{ fontSize: '15px', fontWeight: 700, color: br.stats.yield >= 0 ? 'var(--color-emerald)' : 'var(--color-crimson)' }}>
-                    {br.stats.yield.toFixed(1)}%
-                  </div>
-                </div>
-
-                <div style={{ padding: '8px', background: 'rgba(255,255,255,0.01)', borderRadius: '8px' }}>
-                  <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', fontWeight: 600 }}>Apuestas</span>
-                  <div style={{ fontSize: '15px', fontWeight: 700, color: '#f3f4f6' }}>
-                    {br.stats.settledCount + br.stats.pendingCount}
-                  </div>
-                </div>
-              </div>
-
-              {/* Card Footer Actions */}
-              <div style={{ display: 'flex', gap: '10px', marginTop: '4px' }}>
-                <button 
-                  onClick={() => handleOpenTransaction(br.id)}
-                  className="btn btn-secondary"
-                  style={{ width: '100%', fontSize: '13px', padding: '8px 12px' }}
-                >
-                  Registrar Depósito / Retiro
-                </button>
-              </div>
-
-            </div>
-          ))}
+            );
+          })}
         </div>
       ) : (
         <div className="glass-panel" style={{ padding: '48px', textAlign: 'center', color: 'var(--color-text-muted)' }}>
@@ -568,6 +768,77 @@ export const Bankrolls = () => {
                 </button>
                 <button type="submit" className="btn btn-primary">
                   Registrar
+                </button>
+              </div>
+
+            </form>
+
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Add Goal Modal */}
+      {isGoalModalOpen && createPortal(
+        <div className="modal-overlay">
+          <div className="modal-content glass-panel" style={{ maxWidth: '400px' }}>
+            
+            {/* Header */}
+            <div className="flex-between" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '14px', marginBottom: '20px' }}>
+              <h3 style={{ fontSize: '20px', fontWeight: 700, color: '#f3f4f6' }}>
+                Definir Meta de Rendimiento
+              </h3>
+              <button onClick={() => { setIsGoalModalOpen(false); setIsModalOpen(false); }} className="btn-icon" style={{ border: 'none', background: 'transparent' }}>
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Form */}
+            <form onSubmit={handleSubGoal(handleGoalSubmitDetails)} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              
+              <div className="form-group">
+                <label className="form-label" htmlFor="goal-title">Título de la Meta</label>
+                <input 
+                  id="goal-title"
+                  type="text" 
+                  placeholder="Ej. Doblar Banca, Meta de Verano" 
+                  className="form-input"
+                  {...regGoal('title')}
+                />
+                {errGoal.title && <span className="form-error">{errGoal.title.message}</span>}
+              </div>
+
+              <div className="form-group">
+                <label className="form-label" htmlFor="goal-target">Objetivo de Beneficio (€)</label>
+                <input 
+                  id="goal-target"
+                  type="number" 
+                  step="0.01" 
+                  placeholder="500.00" 
+                  className="form-input"
+                  {...regGoal('target_amount')}
+                />
+                {errGoal.target_amount && <span className="form-error">{errGoal.target_amount.message}</span>}
+              </div>
+
+              <div className="form-group">
+                <label className="form-label" htmlFor="goal-date">Fecha Límite</label>
+                <input 
+                  id="goal-date"
+                  type="date" 
+                  className="form-input"
+                  {...regGoal('target_date')}
+                />
+                {errGoal.target_date && <span className="form-error">{errGoal.target_date.message}</span>}
+              </div>
+
+              {/* Actions */}
+              <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '12px', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '16px' }}>
+                <button type="button" onClick={() => { setIsGoalModalOpen(false); setIsModalOpen(false); }} className="btn btn-secondary">
+                  Cancelar
+                </button>
+                <button type="submit" className="btn btn-primary">
+                  Crear Meta
                 </button>
               </div>
 

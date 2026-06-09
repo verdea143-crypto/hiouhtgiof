@@ -12,6 +12,7 @@ const Calculators = React.lazy(() => import('../views/Calculators'));
 const Settings = React.lazy(() => import('../views/Settings'));
 const Auth = React.lazy(() => import('../views/Auth'));
 const NotFound = React.lazy(() => import('../pages/NotFound'));
+const OddsPortal = React.lazy(() => import('../views/OddsPortal'));
 
 const router = createBrowserRouter([
   {
@@ -75,6 +76,10 @@ const router = createBrowserRouter([
       {
         path: 'settings',
         element: <Settings />
+      },
+      {
+        path: 'odds',
+        element: <OddsPortal />
       },
       {
         path: '*',
