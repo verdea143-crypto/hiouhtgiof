@@ -375,11 +375,11 @@ export const Sidebar = () => {
         }
         .sidebar-link.active {
           color: #030712 !important;
-          background: var(--color-emerald) !important;
+          background: var(--color-accent) !important;
           box-shadow: var(--shadow-glow);
         }
         .mobile-nav-link.active {
-          color: var(--color-emerald) !important;
+          color: var(--color-accent) !important;
         }
         
         @keyframes slideUp {
