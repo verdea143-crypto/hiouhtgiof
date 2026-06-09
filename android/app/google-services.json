@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "967619664166",
+    "project_id": "betflow-fe16f",
+    "storage_bucket": "betflow-fe16f.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:967619664166:android:73db8af709a56f4fdc89e7",
+        "android_client_info": {
+          "package_name": "com.aday5059.betflow"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "967619664166-5fkarbptcmn857nusllmht248p5s4r16.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCiF65l7kr8GUpSBylzSU2pnGlVzZU_aLE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "967619664166-5fkarbptcmn857nusllmht248p5s4r16.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

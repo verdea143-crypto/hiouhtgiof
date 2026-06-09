@@ -76,9 +76,26 @@ export const authService = {
    */
   async signInWithGoogle() {
     if (auth) {
-      const provider = new GoogleAuthProvider();
-      const credential = await signInWithPopup(auth, provider);
-      return credential.user;
+      if (window.Capacitor && window.Capacitor.isNativePlatform()) {
+        const { GoogleAuth } = await import('@codetrix-studio/capacitor-google-auth');
+        try {
+          GoogleAuth.initialize({
+            clientId: '967619664166-5fkarbptcmn857nusllmht248p5s4r16.apps.googleusercontent.com',
+            scopes: ['profile', 'email']
+          });
+        } catch (e) {
+          console.warn('GoogleAuth already initialized:', e);
+        }
+        const user = await GoogleAuth.signIn();
+        const { GoogleAuthProvider, signInWithCredential } = await import('firebase/auth');
+        const credential = GoogleAuthProvider.credential(user.authentication.idToken);
+        const userCredential = await signInWithCredential(auth, credential);
+        return userCredential.user;
+      } else {
+        const provider = new GoogleAuthProvider();
+        const credential = await signInWithPopup(auth, provider);
+        return credential.user;
+      }
     } else {
       throw new Error('El inicio de sesión con Google no está disponible en Modo Local.');
     }

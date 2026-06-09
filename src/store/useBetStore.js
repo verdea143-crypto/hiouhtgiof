@@ -124,7 +124,8 @@ export const useBetStore = create(
           set({ user: currentUser });
           
           if (currentUser && db) {
-            await get().fetchCloudData(currentUser.id);
+            // Fetch in background to prevent initial loading screen hang
+            get().fetchCloudData(currentUser.uid || currentUser.id);
           }
         } catch (e) {
           console.error('Error initializing store:', e);
@@ -168,7 +169,7 @@ export const useBetStore = create(
       setUser: async (user) => {
         set({ user });
         if (user && db) {
-          await get().fetchCloudData(user.id);
+          await get().fetchCloudData(user.uid || user.id);
         } else if (!user) {
           // If sign out, clear state
           set({
@@ -183,7 +184,7 @@ export const useBetStore = create(
       // Seed mock data for quick testing
       seedMockData: async () => {
         const { user } = get();
-        const userId = user ? user.id : 'local_user';
+        const userId = user ? (user.uid || user.id) : 'local_user';
         
         const mockTipsters = [
           { id: generateId('tipster'), user_id: userId, name: 'VIP Football Tips', description: 'Especialista en ligas europeas' },
@@ -304,7 +305,7 @@ export const useBetStore = create(
         if (db && user) {
           set({ isLoading: true });
           try {
-            await deleteUserCollections(db, user.id, ['bets', 'transactions', 'bankrolls', 'tipsters']);
+            await deleteUserCollections(db, user.uid || user.id, ['bets', 'transactions', 'bankrolls', 'tipsters']);
             set({ bets: [], bankrolls: [], tipsters: [], transactions: [] });
             toast.success('Todos los datos han sido borrados de la nube.');
           } catch (e) {
@@ -322,7 +323,7 @@ export const useBetStore = create(
 
       importBackupData: async (backup) => {
         const { user } = get();
-        const userId = user ? user.id : 'local_user';
+        const userId = user ? (user.uid || user.id) : 'local_user';
         
         // Re-assign user_ids for safety
         const bets = (backup.bets || []).map(b => ({ ...b, user_id: userId }));
@@ -360,7 +361,7 @@ export const useBetStore = create(
       // Bets Mutations
       addBet: async (betData) => {
         const { user } = get();
-        const userId = user ? user.id : 'local_user';
+        const userId = user ? (user.uid || user.id) : 'local_user';
         
         const newBet = {
           ...betData,
@@ -469,7 +470,7 @@ export const useBetStore = create(
       // Bankrolls Mutations
       addBankroll: async (bankrollData) => {
         const { user } = get();
-        const userId = user ? user.id : 'local_user';
+        const userId = user ? (user.uid || user.id) : 'local_user';
         
         const newBankroll = {
           ...bankrollData,
@@ -576,7 +577,7 @@ export const useBetStore = create(
       // Tipsters Mutations
       addTipster: async (tipsterData) => {
         const { user } = get();
-        const userId = user ? user.id : 'local_user';
+        const userId = user ? (user.uid || user.id) : 'local_user';
         
         const newTipster = {
           ...tipsterData,
@@ -671,7 +672,7 @@ export const useBetStore = create(
       // Transactions (Deposits / Withdrawals) Mutations
       addTransaction: async (transData) => {
         const { user } = get();
-        const userId = user ? user.id : 'local_user';
+        const userId = user ? (user.uid || user.id) : 'local_user';
         
         const newTrans = {
           ...transData,

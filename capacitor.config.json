@@ -1,0 +1,16 @@
+{
+  "appId": "com.aday5059.betflow",
+  "appName": "BetFlow",
+  "webDir": "dist",
+  "plugins": {
+    "GoogleAuth": {
+      "scopes": [
+        "profile",
+        "email"
+      ],
+      "clientId": "967619664166-5fkarbptcmn857nusllmht248p5s4r16.apps.googleusercontent.com",
+      "serverClientId": "967619664166-5fkarbptcmn857nusllmht248p5s4r16.apps.googleusercontent.com",
+      "forceCodeForRefreshToken": true
+    }
+  }
+}
