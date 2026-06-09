@@ -48,6 +48,24 @@
   color-scheme: dark;
 }
 
+:root.light {
+  --bg-primary: #f3f4f6;
+  --bg-secondary: rgba(255, 255, 255, 0.85);
+  --bg-card: rgba(255, 255, 255, 0.75);
+  --bg-input: rgba(243, 244, 246, 0.95);
+  
+  --border-glass: rgba(0, 0, 0, 0.08);
+  --border-glass-active: rgba(16, 185, 129, 0.4);
+  
+  --color-text-primary: #111827;
+  --color-text-secondary: #4b5563;
+  --color-text-muted: #9ca3af;
+  
+  --shadow-premium: 0 10px 30px -10px rgba(0, 0, 0, 0.08);
+  
+  color-scheme: light;
+}
+
 /* Base Styles */
 * {
   box-sizing: border-box;

@@ -8,7 +8,8 @@ import {
   Layers,
   ChevronRight,
   TrendingUp as GainIcon,
-  TrendingDown as LossIcon
+  TrendingDown as LossIcon,
+  AlertTriangle
 } from 'lucide-react';
 import { 
   ResponsiveContainer, 
@@ -25,6 +26,7 @@ import {
 import { useBetStore } from '../store/useBetStore';
 import { calculateStats, getBetProfit } from '../utils/math';
 import { CustomSelect } from '../components/CustomSelect';
+import { detectarRachaNegativa } from '../utils/rachaAlert';
 
 const COLORS = ['#10b981', '#3b82f6', '#8b5cf6', '#f59e0b', '#ec4899', '#06b6d4', '#14b8a6'];
 
@@ -631,6 +633,28 @@ export const Dashboard = () => {
 
       {activeTab === 'summary' ? (
         <>
+          {/* Alerta de Racha Negativa */}
+          {detectarRachaNegativa(bets) && (
+            <div className="animate-fade-in" style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '12px', 
+              padding: '16px', 
+              backgroundColor: 'rgba(239, 68, 68, 0.1)', 
+              border: '1px solid rgba(239, 68, 68, 0.3)', 
+              borderRadius: '12px', 
+              color: '#f87171',
+              fontSize: '14px',
+              marginBottom: '4px'
+            }}>
+              <AlertTriangle size={20} style={{ color: '#ef4444', flexShrink: 0 }} />
+              <div>
+                <p style={{ fontWeight: 700, margin: 0 }}>Racha negativa detectada</p>
+                <p style={{ margin: 0, fontSize: '12px', opacity: 0.8 }}>Llevas 5 o más apuestas perdidas seguidas. Considera revisar tu estrategia.</p>
+              </div>
+            </div>
+          )}
+
           {/* KPI Cards Grid */}
           <div className="grid-cols-4 animate-fade-in" style={{ animationDelay: '0.1s' }}>
         

@@ -15,10 +15,12 @@ import {
   CheckCircle,
   XCircle,
   HelpCircle,
-  MinusCircle
+  MinusCircle,
+  Download
 } from 'lucide-react';
 import { useBetStore } from '../store/useBetStore';
 import { CustomSelect } from '../components/CustomSelect';
+import { exportToCSV } from '../utils/exportCSV';
 
 // Validation Schema
 const betSchema = z.object({
@@ -218,14 +220,27 @@ export const Bets = () => {
             Lista detallada y gestión de tus posiciones.
           </p>
         </div>
-        <button 
-          onClick={handleOpenAdd}
-          className="btn btn-primary"
-          style={{ gap: '6px' }}
-        >
-          <Plus size={18} />
-          Nueva Apuesta
-        </button>
+        <div style={{ display: 'flex', gap: '12px' }}>
+          {bets.length > 0 && (
+            <button
+              onClick={() => exportToCSV(bets)}
+              className="btn btn-secondary"
+              style={{ gap: '6px', display: 'flex', alignItems: 'center', borderColor: 'var(--border-glass)' }}
+              aria-label="Exportar apuestas a CSV"
+            >
+              <Download size={18} />
+              <span>Exportar CSV</span>
+            </button>
+          )}
+          <button 
+            onClick={handleOpenAdd}
+            className="btn btn-primary"
+            style={{ gap: '6px' }}
+          >
+            <Plus size={18} />
+            Nueva Apuesta
+          </button>
+        </div>
       </div>
 
       {/* Warning if no bankrolls */}
@@ -392,14 +407,14 @@ export const Bets = () => {
                       </td>
                       <td>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-                          
-                          {/* Quick Settle Options */}
+                              {/* Quick Settle Options */}
                           {bet.status === 'pending' && (
                             <div style={{ display: 'flex', gap: '4px', borderRight: '1px solid rgba(255,255,255,0.06)', paddingRight: '8px', marginRight: '4px' }}>
                               <button 
                                 onClick={() => settleBet(bet.id, 'won')}
                                 className="btn-action-glass action-won" 
                                 title="Marcar como Ganada"
+                                aria-label="Marcar como Ganada"
                               >
                                 <Check size={14} />
                               </button>
@@ -407,6 +422,7 @@ export const Bets = () => {
                                 onClick={() => settleBet(bet.id, 'lost')}
                                 className="btn-action-glass action-lost" 
                                 title="Marcar como Perdida"
+                                aria-label="Marcar como Perdida"
                               >
                                 <X size={14} />
                               </button>
@@ -414,6 +430,7 @@ export const Bets = () => {
                                 onClick={() => settleBet(bet.id, 'void')}
                                 className="btn-action-glass action-void" 
                                 title="Marcar como Nula"
+                                aria-label="Marcar como Nula"
                               >
                                 <MinusCircle size={14} />
                               </button>
@@ -425,6 +442,7 @@ export const Bets = () => {
                               onClick={() => settleBet(bet.id, 'pending')}
                               className="btn-action-glass action-reopen" 
                               title="Reabrir (Pendiente)"
+                              aria-label="Reabrir apuesta como Pendiente"
                             >
                               <RotateCcw size={14} />
                             </button>
@@ -434,6 +452,7 @@ export const Bets = () => {
                             onClick={() => handleOpenEdit(bet)}
                             className="btn-action-glass action-edit" 
                             title="Editar"
+                            aria-label="Editar apuesta"
                           >
                             <Edit2 size={14} />
                           </button>
@@ -441,6 +460,7 @@ export const Bets = () => {
                             onClick={() => handleDelete(bet.id)}
                             className="btn-action-glass action-delete" 
                             title="Eliminar"
+                            aria-label="Eliminar apuesta"
                           >
                             <Trash2 size={14} />
                           </button>
@@ -483,8 +503,9 @@ export const Bets = () => {
               
               <div className="grid-cols-2" style={{ gap: '14px' }}>
                 <div className="form-group">
-                  <label className="form-label">Deporte</label>
+                  <label htmlFor="sport" className="form-label">Deporte</label>
                   <input 
+                    id="sport"
                     type="text" 
                     placeholder="Fútbol, Tenis, etc." 
                     className="form-input"
@@ -498,8 +519,9 @@ export const Bets = () => {
                 </div>
 
                 <div className="form-group">
-                  <label className="form-label">Casa de Apuestas</label>
+                  <label htmlFor="bookmaker" className="form-label">Casa de Apuestas</label>
                   <input 
+                    id="bookmaker"
                     type="text" 
                     placeholder="Bet365, Codere, etc." 
                     className="form-input"
@@ -510,8 +532,9 @@ export const Bets = () => {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Evento</label>
+                <label htmlFor="event" className="form-label">Evento</label>
                 <input 
+                  id="event"
                   type="text" 
                   placeholder="Real Madrid vs Barcelona" 
                   className="form-input"
@@ -521,8 +544,9 @@ export const Bets = () => {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Mercado / Pronóstico</label>
+                <label htmlFor="market" className="form-label">Mercado / Pronóstico</label>
                 <input 
+                  id="market"
                   type="text" 
                   placeholder="Ganador Real Madrid, Más de 2.5 goles" 
                   className="form-input"
@@ -533,8 +557,9 @@ export const Bets = () => {
 
               <div className="grid-cols-2" style={{ gap: '14px' }}>
                 <div className="form-group">
-                  <label className="form-label">Cuota</label>
+                  <label htmlFor="odds" className="form-label">Cuota</label>
                   <input 
+                    id="odds"
                     type="number" 
                     step="0.01" 
                     placeholder="1.95" 
@@ -545,8 +570,9 @@ export const Bets = () => {
                 </div>
 
                 <div className="form-group">
-                  <label className="form-label">Stake (%)</label>
+                  <label htmlFor="stake_percent" className="form-label">Stake (%)</label>
                   <input 
+                    id="stake_percent"
                     type="number" 
                     step="0.1" 
                     placeholder="2" 
@@ -621,8 +647,9 @@ export const Bets = () => {
 
               <div className="grid-cols-2" style={{ gap: '14px' }}>
                 <div className="form-group">
-                  <label className="form-label">Fecha</label>
+                  <label htmlFor="date" className="form-label">Fecha</label>
                   <input 
+                    id="date"
                     type="date" 
                     className="form-input"
                     {...register('date')}

@@ -11,6 +11,7 @@ const Tipsters = React.lazy(() => import('../views/Tipsters'));
 const Calculators = React.lazy(() => import('../views/Calculators'));
 const Settings = React.lazy(() => import('../views/Settings'));
 const Auth = React.lazy(() => import('../views/Auth'));
+const NotFound = React.lazy(() => import('../pages/NotFound'));
 
 const router = createBrowserRouter([
   {
@@ -77,7 +78,7 @@ const router = createBrowserRouter([
       },
       {
         path: '*',
-        element: <Navigate to="/dashboard" replace />
+        element: <NotFound />
       }
     ]
   }

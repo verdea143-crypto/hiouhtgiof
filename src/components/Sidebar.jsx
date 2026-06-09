@@ -11,13 +11,17 @@ import {
   Cloud, 
   CloudOff,
   Menu,
-  X
+  X,
+  Sun,
+  Moon
 } from 'lucide-react';
 import { useBetStore } from '../store/useBetStore';
 import { authService } from '../services/authService';
+import { useTheme } from '../hooks/useTheme';
 
 export const Sidebar = () => {
   const navigate = useNavigate();
+  const { theme, toggleTheme } = useTheme();
   const user = useBetStore(state => state.user);
   const setUser = useBetStore(state => state.setUser);
   const isCloud = useBetStore(state => state.isCloudActive());
@@ -132,7 +136,7 @@ export const Sidebar = () => {
 
           {/* User profile */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingLeft: '4px' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', maxWidth: '140px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', maxWidth: '110px' }}>
               <span style={{ fontSize: '14px', fontWeight: 600, color: '#f3f4f6', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {user?.email ? user.email.split('@')[0] : 'Invitado'}
               </span>
@@ -140,14 +144,25 @@ export const Sidebar = () => {
                 {user?.email || 'Modo Local'}
               </span>
             </div>
-            <button 
-              onClick={handleLogout}
-              className="btn-icon" 
-              title="Cerrar sesión"
-              style={{ color: '#ef4444', cursor: 'pointer', border: 'none' }}
-            >
-              <LogOut size={16} />
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <button
+                onClick={toggleTheme}
+                title="Cambiar tema"
+                aria-label="Cambiar tema"
+                style={{ color: '#9ca3af', cursor: 'pointer', border: 'none', background: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '6px', borderRadius: '6px' }}
+              >
+                {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+              </button>
+              <button 
+                onClick={handleLogout}
+                className="btn-icon" 
+                title="Cerrar sesión"
+                aria-label="Cerrar sesión"
+                style={{ color: '#ef4444', cursor: 'pointer', border: 'none', background: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '6px' }}
+              >
+                <LogOut size={16} />
+              </button>
+            </div>
           </div>
         </div>
       </aside>
@@ -262,13 +277,23 @@ export const Sidebar = () => {
                 <span style={{ fontSize: '16px', fontWeight: 700, color: '#f3f4f6' }}>Menú Principal</span>
                 <span style={{ fontSize: '12px', color: '#6b7280' }}>{user?.email || 'Modo Local'}</span>
               </div>
-              <button 
-                onClick={() => setShowMore(false)}
-                className="btn-icon"
-                style={{ color: '#9ca3af', border: 'none', background: 'transparent' }}
-              >
-                <X size={20} />
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <button
+                  onClick={toggleTheme}
+                  title="Cambiar tema"
+                  aria-label="Cambiar tema"
+                  style={{ color: '#9ca3af', cursor: 'pointer', border: 'none', background: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '6px', borderRadius: '6px' }}
+                >
+                  {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+                </button>
+                <button 
+                  onClick={() => setShowMore(false)}
+                  className="btn-icon"
+                  style={{ color: '#9ca3af', border: 'none', background: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '6px' }}
+                >
+                  <X size={20} />
+                </button>
+              </div>
             </div>
 
             {/* Extra Menu Grid */}

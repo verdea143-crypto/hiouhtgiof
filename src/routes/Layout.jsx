@@ -17,7 +17,7 @@ export const Layout = () => {
           padding: '24px',
           overflowY: 'auto',
           height: '100vh',
-          backgroundColor: '#080b11',
+          backgroundColor: 'var(--bg-primary)',
           marginLeft: isModalOpen ? '0px' : '260px',
           transition: 'margin-left 0.25s cubic-bezier(0.4, 0, 0.2, 1)'
         }}>
