@@ -54,6 +54,26 @@ export const Bets = () => {
   const setGlobalModalOpen = useBetStore(state => state.setIsModalOpen);
   const getBankrollBalance = useBetStore(state => state.getBankrollBalance);
 
+  // React Hook Form
+  const { register, handleSubmit, formState: { errors }, reset, setValue, watch } = useForm({
+    resolver: zodResolver(betSchema),
+    defaultValues: {
+      sport: '',
+      event: '',
+      market: '',
+      odds: '',
+      stake_percent: '',
+      bookmaker: '',
+      date: new Date().toISOString().split('T')[0],
+      bankroll_id: '',
+      tipster_id: 'none',
+      status: 'pending'
+    }
+  });
+
+  const watchBankrollId = watch('bankroll_id');
+  const watchStakePercent = watch('stake_percent');
+
   // States
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingBet, setEditingBet] = useState(null);
@@ -133,33 +153,12 @@ export const Bets = () => {
   const [filterBankroll, setFilterBankroll] = useState('all');
   const [filterTipster, setFilterTipster] = useState('all');
 
-  // React Hook Form
-  const { register, handleSubmit, formState: { errors }, reset, setValue, watch } = useForm({
-    resolver: zodResolver(betSchema),
-    defaultValues: {
-      sport: '',
-      event: '',
-      market: '',
-      odds: '',
-      stake_percent: '',
-      bookmaker: '',
-      date: new Date().toISOString().split('T')[0],
-      bankroll_id: '',
-      tipster_id: 'none',
-      status: 'pending'
-    }
-  });
-
   // Register manual fields for custom selects
   useEffect(() => {
     register('bankroll_id');
     register('tipster_id');
     register('status');
   }, [register]);
-
-  // Watch bankroll and stake percent changes
-  const watchBankrollId = watch('bankroll_id');
-  const watchStakePercent = watch('stake_percent');
 
   const selectedBankrollBalance = useMemo(() => {
     if (!watchBankrollId) return 0;

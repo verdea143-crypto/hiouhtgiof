@@ -117,6 +117,14 @@ export const Bankrolls = () => {
   const addTransaction = useBetStore(state => state.addTransaction);
   const setIsModalOpen = useBetStore(state => state.setIsModalOpen);
 
+  // States
+  const [isBankrollModalOpen, setIsBankrollModalOpen] = useState(false);
+  const [editingBankroll, setEditingBankroll] = useState(null);
+  const [isTransModalOpen, setIsTransModalOpen] = useState(false);
+  const [selectedBankrollForTrans, setSelectedBankrollForTrans] = useState('');
+  const [isGoalModalOpen, setIsGoalModalOpen] = useState(false);
+  const [selectedBankrollForGoal, setSelectedBankrollForGoal] = useState('');
+
   // React Hook Form for Goals
   const { register: regGoal, handleSubmit: handleSubGoal, reset: resetGoal, formState: { errors: errGoal } } = useForm({
     resolver: zodResolver(goalSchema),
