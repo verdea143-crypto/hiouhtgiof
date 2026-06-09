@@ -13,7 +13,8 @@ import {
   Palette,
   TrendingUp,
   X,
-  ArrowRight
+  ArrowRight,
+  Globe
 } from 'lucide-react';
 import { useBetStore } from '../store/useBetStore';
 import { toast } from 'sonner';
@@ -36,7 +37,13 @@ export const Settings = () => {
   const importBets = useBetStore(state => state.importBets);
   const getBankrollBalance = useBetStore(state => state.getBankrollBalance);
 
+  const oddsApiKey = useBetStore(state => state.oddsApiKey || '');
+  const oddsApiEnabled = useBetStore(state => state.oddsApiEnabled || false);
+  const setOddsApiKey = useBetStore(state => state.setOddsApiKey);
+  const setOddsApiEnabled = useBetStore(state => state.setOddsApiEnabled);
+
   // CSV Importer States
+  const [showApiKey, setShowApiKey] = useState(false);
   const [isCsvModalOpen, setIsCsvModalOpen] = useState(false);
   const [csvHeaders, setCsvHeaders] = useState([]);
   const [csvRows, setCsvRows] = useState([]);
@@ -585,6 +592,55 @@ service cloud.firestore {
                 <span style={{ fontSize: '14px', color: 'var(--color-text-secondary)', fontWeight: 600 }}>% sobre beneficios</span>
               </div>
             </div>
+          </div>
+
+          {/* Odds API Configuration Card */}
+          <div className="glass-panel" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <Globe size={20} style={{ color: 'var(--color-accent)' }} />
+              <h3 style={{ fontSize: '18px', fontWeight: 700, color: '#f3f4f6' }}>Portal de Cuotas (Odds API)</h3>
+            </div>
+            <div style={{ fontSize: '13px', color: 'var(--color-text-secondary)' }}>
+              Configura la conexión con la API de cuotas en tiempo real para visualizar partidos reales en vez de simulaciones. Consigue tu clave gratis en <a href="https://the-odds-api.com" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-accent)', textDecoration: 'underline' }}>the-odds-api.com</a>.
+            </div>
+            
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <label htmlFor="toggle-odds-api" style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: 600, color: 'var(--color-text-primary)' }}>
+                <input
+                  id="toggle-odds-api"
+                  type="checkbox"
+                  checked={oddsApiEnabled}
+                  onChange={(e) => setOddsApiEnabled(e.target.checked)}
+                  style={{ accentColor: 'var(--color-accent)', width: '16px', height: '16px' }}
+                />
+                Activar API en Tiempo Real (Fútbol, Baloncesto, Tenis)
+              </label>
+            </div>
+
+            {oddsApiEnabled && (
+              <div className="form-group" style={{ marginTop: '4px' }}>
+                <label htmlFor="odds-api-key-input" className="form-label">CLAVE DE API (THE ODDS API)</label>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <input
+                    id="odds-api-key-input"
+                    type={showApiKey ? 'text' : 'password'}
+                    placeholder="Introduce tu apiKey de the-odds-api"
+                    className="form-input"
+                    value={oddsApiKey}
+                    onChange={(e) => setOddsApiKey(e.target.value)}
+                    style={{ flex: 1 }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowApiKey(!showApiKey)}
+                    className="btn btn-secondary"
+                    style={{ padding: '0 12px', fontSize: '12px', minWidth: '80px' }}
+                  >
+                    {showApiKey ? 'Ocultar' : 'Mostrar'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
         </div>

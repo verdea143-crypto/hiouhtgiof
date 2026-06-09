@@ -72,6 +72,8 @@ export const useBetStore = create(
       themeAccent: 'emerald',
       taxRate: 0,
       goals: [],
+      oddsApiKey: '',
+      oddsApiEnabled: false,
 
       // Helper Getters (Selectors)
       isCloudActive: () => db !== null,
@@ -118,6 +120,8 @@ export const useBetStore = create(
       setIsModalOpen: (isOpen) => set({ isModalOpen: isOpen }),
       setThemeAccent: (accent) => set({ themeAccent: accent }),
       setTaxRate: (rate) => set({ taxRate: Number(rate) || 0 }),
+      setOddsApiKey: (apiKey) => set({ oddsApiKey: apiKey }),
+      setOddsApiEnabled: (enabled) => set({ oddsApiEnabled: enabled }),
 
       initStore: async () => {
         if (get().isInitialized) return;
@@ -857,7 +861,9 @@ export const useBetStore = create(
         transactions: state.transactions,
         themeAccent: state.themeAccent,
         taxRate: state.taxRate,
-        goals: state.goals
+        goals: state.goals,
+        oddsApiKey: state.oddsApiKey,
+        oddsApiEnabled: state.oddsApiEnabled
       })
     }
   )

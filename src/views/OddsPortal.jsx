@@ -1,9 +1,11 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Zap, Coins, TrendingUp } from 'lucide-react';
+import { Search, Zap, Coins, TrendingUp, AlertTriangle } from 'lucide-react';
 import CustomSelect from '../components/CustomSelect';
+import { useBetStore } from '../store/useBetStore';
+import { LoadingSpinner } from '../components/LoadingSpinner';
 
-// Mock Upcoming Sports Matches & Live Odds
+// Mock Upcoming Sports Matches & Live Odds (Demo Mode Fallback)
 const GENERATE_MOCK_MATCHES = () => {
   const sports = [
     { id: 'football', name: 'Fútbol', icon: '⚽' },
@@ -47,11 +49,9 @@ const GENERATE_MOCK_MATCHES = () => {
   sports.forEach(sport => {
     const pairs = teams[sport.id];
     pairs.forEach((pair, idx) => {
-      // Schedule games between 1 hour to 48 hours in the future
       const offsetHours = 2 + idx * 6;
       const gameTime = new Date(baseTime + offsetHours * 60 * 60 * 1000);
       
-      // Generate realistic odds
       const odd1 = Number((1.2 + Math.random() * 2.5).toFixed(2));
       const oddX = sport.id === 'football' ? Number((2.8 + Math.random() * 2.2).toFixed(2)) : null;
       const odd2 = Number((1.3 + Math.random() * 3.0).toFixed(2));
@@ -83,7 +83,139 @@ export default function OddsPortal() {
   const [selectedSport, setSelectedSport] = useState('all');
   const [selectedBookmaker, setSelectedBookmaker] = useState('bet365');
 
-  const matches = useMemo(() => GENERATE_MOCK_MATCHES(), []);
+  // Zustand Store config
+  const oddsApiKey = useBetStore(state => state.oddsApiKey);
+  const oddsApiEnabled = useBetStore(state => state.oddsApiEnabled);
+
+  // States
+  const [matches, setMatches] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const demoMatches = useMemo(() => GENERATE_MOCK_MATCHES(), []);
+
+  // Fetch real odds or use mock data based on settings
+  useEffect(() => {
+    if (!oddsApiEnabled) {
+      setMatches(demoMatches);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
+    if (!oddsApiKey) {
+      setMatches([]);
+      setError('Clave de API no configurada');
+      return;
+    }
+
+    const fetchOdds = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const response = await fetch(
+          `https://api.the-odds-api.com/v4/sports/upcoming/odds/?apiKey=${oddsApiKey}&regions=eu&markets=h2h&oddsFormat=decimal`
+        );
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(errData.message || `Error del servidor (Código ${response.status})`);
+        }
+        const data = await response.json();
+        
+        // Map data from The Odds API structure to our app structure
+        const mapped = data.map((event, idx) => {
+          const key = (event.sport_key || '').toLowerCase();
+          let sportId = 'other';
+          let sportName = event.sport_title || 'Otro';
+          let sportIcon = '🏆';
+
+          if (key.includes('soccer') || key.includes('football')) {
+            sportId = 'football';
+            sportName = 'Fútbol';
+            sportIcon = '⚽';
+          } else if (key.includes('basketball')) {
+            sportId = 'basketball';
+            sportName = 'Baloncesto';
+            sportIcon = '🏀';
+          } else if (key.includes('tennis')) {
+            sportId = 'tennis';
+            sportName = 'Tenis';
+            sportIcon = '🎾';
+          }
+
+          const oddsObj = {
+            bet365: { '1': null, X: null, '2': null },
+            pinnacle: { '1': null, X: null, '2': null },
+            bwin: { '1': null, X: null, '2': null }
+          };
+
+          // Helper to map a specific bookmaker market
+          const mapBookmaker = (bmKey) => {
+            const bm = event.bookmakers?.find(b => b.key === bmKey);
+            if (!bm) return null;
+            const market = bm.markets?.find(m => m.key === 'h2h');
+            if (!market) return null;
+
+            const homeOut = market.outcomes?.find(o => o.name === event.home_team);
+            const awayOut = market.outcomes?.find(o => o.name === event.away_team);
+            const drawOut = market.outcomes?.find(o => o.name === 'Draw' || o.name === 'Empate');
+
+            return {
+              '1': homeOut ? Number(homeOut.price) : null,
+              X: drawOut ? Number(drawOut.price) : null,
+              '2': awayOut ? Number(awayOut.price) : null
+            };
+          };
+
+          const b365 = mapBookmaker('bet365');
+          const pinn = mapBookmaker('pinnacle');
+          const bwn = mapBookmaker('bwin');
+
+          // Fallback logic if the preferred bookmaker is missing
+          const getFallbackOdds = () => {
+            const firstBm = event.bookmakers?.find(b => b.markets?.some(m => m.key === 'h2h'));
+            if (!firstBm) return { '1': 1.00, X: null, '2': 1.00 };
+            const market = firstBm.markets?.find(m => m.key === 'h2h');
+            const homeOut = market.outcomes?.find(o => o.name === event.home_team);
+            const awayOut = market.outcomes?.find(o => o.name === event.away_team);
+            const drawOut = market.outcomes?.find(o => o.name === 'Draw' || o.name === 'Empate');
+            return {
+              '1': homeOut ? Number(homeOut.price) : 1.00,
+              X: drawOut ? Number(drawOut.price) : null,
+              '2': awayOut ? Number(awayOut.price) : 1.00
+            };
+          };
+
+          const fallback = getFallbackOdds();
+
+          oddsObj.bet365 = b365 || fallback;
+          oddsObj.pinnacle = pinn || fallback;
+          oddsObj.bwin = bwn || fallback;
+
+          return {
+            id: event.id || `event_${idx}`,
+            sport: sportName,
+            sportId: sportId,
+            sportIcon: sportIcon,
+            league: event.sport_title || 'Liga General',
+            homeTeam: event.home_team || 'Equipo Local',
+            awayTeam: event.away_team || 'Equipo Visitante',
+            date: event.commence_time,
+            odds: oddsObj
+          };
+        });
+
+        setMatches(mapped);
+      } catch (err) {
+        console.error('Error fetching odds:', err);
+        setError(err.message || 'Error al obtener las cuotas en tiempo real');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchOdds();
+  }, [oddsApiEnabled, oddsApiKey, demoMatches]);
 
   // Filter matches based on search term & selected sport
   const filteredMatches = useMemo(() => {
@@ -96,6 +228,7 @@ export default function OddsPortal() {
   }, [matches, searchTerm, selectedSport]);
 
   const handleQuickBet = (match, bookmaker, label, odd) => {
+    if (!odd) return;
     const prefillData = {
       partido: `${match.homeTeam} vs ${match.awayTeam}`,
       deporte: match.sport,
@@ -126,10 +259,12 @@ export default function OddsPortal() {
       <div className="flex-between" style={{ marginBottom: '24px' }}>
         <div>
           <h1 style={{ fontSize: '28px', fontWeight: 800, color: 'var(--color-text-primary)' }}>
-            Portal de <span style={{ color: 'var(--color-accent)' }}>Cuotas</span> en Vivo
+            Portal de <span style={{ color: 'var(--color-accent)' }}>Cuotas</span> {oddsApiEnabled ? 'en Vivo' : 'Demo'}
           </h1>
           <p style={{ color: 'var(--color-text-secondary)', fontSize: '14px', marginTop: '4px' }}>
-            Compara cuotas en tiempo real de casas premium y genera apuestas al instante.
+            {oddsApiEnabled 
+              ? 'Comparando cuotas en tiempo real obtenidas desde The Odds API para casas de apuestas premium.'
+              : 'Visualizando cuotas simuladas de prueba. Puedes activar cuotas reales desde la sección de Ajustes.'}
           </p>
         </div>
       </div>
@@ -177,8 +312,46 @@ export default function OddsPortal() {
         </div>
       </div>
 
-      {/* Grid of Matches */}
-      {filteredMatches.length === 0 ? (
+      {/* Grid of Matches / Loading / Error states */}
+      {loading ? (
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '60px 0' }}>
+          <LoadingSpinner size="lg" text="Cargando partidos y cuotas en tiempo real..." />
+        </div>
+      ) : error ? (
+        <div className="glass-card flex-column" style={{ padding: '48px 20px', textAlign: 'center', color: 'var(--color-text-secondary)', maxWidth: '600px', margin: '0 auto', gap: '12px' }}>
+          <div style={{ display: 'flex', justifyContent: 'center' }}>
+            <AlertTriangle size={40} style={{ color: error === 'Clave de API no configurada' ? 'var(--color-accent)' : '#ef4444' }} />
+          </div>
+          <p style={{ fontWeight: 700, color: '#f3f4f6', fontSize: '18px', margin: 0 }}>
+            {error === 'Clave de API no configurada' ? 'Clave de API Requerida' : 'Error al obtener datos'}
+          </p>
+          <p style={{ fontSize: '14px', margin: 0, opacity: 0.8, lineHeight: 1.5 }}>
+            {error === 'Clave de API no configurada' 
+              ? 'Has activado la API en tiempo real pero aún no has configurado tu clave API (API Key) en los Ajustes.' 
+              : `Ocurrió un error al conectar con The Odds API: ${error}`}
+          </p>
+          {error === 'Clave de API no configurada' ? (
+            <button
+              onClick={() => navigate('/settings')}
+              className="btn btn-primary"
+              style={{ marginTop: '12px', alignSelf: 'center' }}
+            >
+              Configurar en Ajustes
+            </button>
+          ) : (
+            <button
+              onClick={() => {
+                setError(null);
+                setMatches(demoMatches);
+              }}
+              className="btn btn-secondary"
+              style={{ marginTop: '12px', alignSelf: 'center' }}
+            >
+              Volver a Modo Demo
+            </button>
+          )}
+        </div>
+      ) : filteredMatches.length === 0 ? (
         <div className="glass-card flex-column" style={{ padding: '48px 20px', textAlign: 'center', color: 'var(--color-text-secondary)' }}>
           <Zap size={40} style={{ color: 'var(--color-accent-glow)', marginBottom: '12px' }} />
           <p style={{ fontWeight: 600 }}>No se encontraron partidos próximos.</p>
@@ -187,7 +360,7 @@ export default function OddsPortal() {
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: '20px' }}>
           {filteredMatches.map((match) => {
-            const bookmakerOdds = match.odds[selectedBookmaker];
+            const bookmakerOdds = match.odds[selectedBookmaker] || { '1': null, X: null, '2': null };
             const hasDraw = bookmakerOdds.X !== null;
             
             return (
@@ -200,8 +373,8 @@ export default function OddsPortal() {
                       {match.sport}
                     </span>
                   </div>
-                  <span style={{ fontSize: '12px', color: 'var(--color-text-muted)', fontWeight: 500, backgroundColor: 'rgba(255,255,255,0.03)', padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--border-glass)' }}>
-                    {match.league}
+                  <span style={{ fontSize: '12px', color: 'var(--color-text-muted)', fontWeight: 500, backgroundColor: 'rgba(255,255,255,0.03)', padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--border-glass)' }} title={match.league}>
+                    {match.league.length > 20 ? `${match.league.substring(0, 18)}...` : match.league}
                   </span>
                 </div>
 
@@ -234,33 +407,36 @@ export default function OddsPortal() {
                     {/* Odd 1 */}
                     <button
                       onClick={() => handleQuickBet(match, selectedBookmaker, '1', bookmakerOdds['1'])}
+                      disabled={!bookmakerOdds['1']}
                       className="btn-action-glass"
-                      style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '10px 4px', borderRadius: '10px', transition: 'var(--transition-smooth)' }}
+                      style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '10px 4px', borderRadius: '10px', transition: 'var(--transition-smooth)', opacity: bookmakerOdds['1'] ? 1 : 0.4 }}
                     >
                       <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', fontWeight: 600 }}>1</span>
-                      <span style={{ fontSize: '15px', fontWeight: 800, color: 'var(--color-accent)', marginTop: '2px' }}>{bookmakerOdds['1']}</span>
+                      <span style={{ fontSize: '15px', fontWeight: 800, color: 'var(--color-accent)', marginTop: '2px' }}>{bookmakerOdds['1'] || 'N/A'}</span>
                     </button>
 
                     {/* Odd X (Draw) */}
                     {hasDraw && (
                       <button
                         onClick={() => handleQuickBet(match, selectedBookmaker, 'X', bookmakerOdds.X)}
+                        disabled={!bookmakerOdds.X}
                         className="btn-action-glass"
-                        style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '10px 4px', borderRadius: '10px', transition: 'var(--transition-smooth)' }}
+                        style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '10px 4px', borderRadius: '10px', transition: 'var(--transition-smooth)', opacity: bookmakerOdds.X ? 1 : 0.4 }}
                       >
                         <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', fontWeight: 600 }}>X</span>
-                        <span style={{ fontSize: '15px', fontWeight: 800, color: 'var(--color-text-primary)', marginTop: '2px' }}>{bookmakerOdds.X}</span>
+                        <span style={{ fontSize: '15px', fontWeight: 800, color: 'var(--color-text-primary)', marginTop: '2px' }}>{bookmakerOdds.X || 'N/A'}</span>
                       </button>
                     )}
 
                     {/* Odd 2 */}
                     <button
                       onClick={() => handleQuickBet(match, selectedBookmaker, '2', bookmakerOdds['2'])}
+                      disabled={!bookmakerOdds['2']}
                       className="btn-action-glass"
-                      style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '10px 4px', borderRadius: '10px', transition: 'var(--transition-smooth)' }}
+                      style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '10px 4px', borderRadius: '10px', transition: 'var(--transition-smooth)', opacity: bookmakerOdds['2'] ? 1 : 0.4 }}
                     >
                       <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', fontWeight: 600 }}>2</span>
-                      <span style={{ fontSize: '15px', fontWeight: 800, color: 'var(--color-accent)', marginTop: '2px' }}>{bookmakerOdds['2']}</span>
+                      <span style={{ fontSize: '15px', fontWeight: 800, color: 'var(--color-accent)', marginTop: '2px' }}>{bookmakerOdds['2'] || 'N/A'}</span>
                     </button>
                   </div>
                 </div>
