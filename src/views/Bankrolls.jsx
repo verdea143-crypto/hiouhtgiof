@@ -16,6 +16,14 @@ import {
   Calendar,
   DollarSign
 } from 'lucide-react';
+import { 
+  ResponsiveContainer, 
+  AreaChart, 
+  Area, 
+  XAxis, 
+  YAxis, 
+  Tooltip 
+} from 'recharts';
 import { useBetStore } from '../store/useBetStore';
 import { calculateStats } from '../utils/math';
 import { CustomSelect } from '../components/CustomSelect';
@@ -39,7 +47,60 @@ export const Bankrolls = () => {
   const bankrolls = useBetStore(state => state.bankrolls);
   const bets = useBetStore(state => state.bets);
   const transactions = useBetStore(state => state.transactions);
-  
+
+  const getBankrollChartData = (bankrollId, initialBalance) => {
+    const brBets = bets.filter(b => b.bankroll_id === bankrollId);
+    const brTrans = transactions.filter(t => t.bankroll_id === bankrollId);
+
+    const events = [];
+
+    brTrans.forEach(t => {
+      events.push({
+        date: t.date,
+        amount: t.type === 'deposit' ? Number(t.amount) : -Number(t.amount)
+      });
+    });
+
+    brBets.forEach(b => {
+      const stake = Number(b.stake) || 0;
+      const odds = Number(b.odds) || 0;
+      
+      let profit = -stake;
+      if (b.status === 'won') {
+        profit += (stake * odds);
+      } else if (b.status === 'void') {
+        profit += stake;
+      }
+      events.push({
+        date: b.date,
+        amount: profit
+      });
+    });
+
+    const dateMap = {};
+    events.forEach(e => {
+      if (!e.date) return;
+      dateMap[e.date] = (dateMap[e.date] || 0) + e.amount;
+    });
+
+    const sortedDates = Object.keys(dateMap).sort((a, b) => new Date(a) - new Date(b));
+    let runningBalance = Number(initialBalance) || 0;
+
+    const data = [
+      { date: 'Inicio', balance: runningBalance }
+    ];
+
+    sortedDates.forEach(date => {
+      runningBalance += dateMap[date];
+      data.push({
+        date: date.split('-').slice(1).join('/'),
+        balance: Number(runningBalance.toFixed(2))
+      });
+    });
+
+    return data;
+  };
+
   const getBankrollBalance = useBetStore(state => state.getBankrollBalance);
   const addBankroll = useBetStore(state => state.addBankroll);
   const updateBankroll = useBetStore(state => state.updateBankroll);
@@ -243,6 +304,47 @@ export const Bankrolls = () => {
                   </div>
                 </div>
               </div>
+
+              {/* Evolution Chart */}
+              {(() => {
+                const chartData = getBankrollChartData(br.id, br.initial_balance);
+                return (
+                  <div style={{ height: '110px', width: '100%', margin: '4px 0' }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={chartData} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
+                        <defs>
+                          <linearGradient id={`colorBalance-${br.id}`} x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="var(--color-accent)" stopOpacity={0.15}/>
+                            <stop offset="95%" stopColor="var(--color-accent)" stopOpacity={0}/>
+                          </linearGradient>
+                        </defs>
+                        <XAxis dataKey="date" hide={true} />
+                        <YAxis hide={true} domain={['dataMin - 50', 'dataMax + 50']} />
+                        <Tooltip 
+                          contentStyle={{ 
+                            background: 'rgba(17, 24, 39, 0.85)', 
+                            border: '1px solid var(--border-glass)',
+                            borderRadius: '8px',
+                            color: '#fff',
+                            fontSize: '11px',
+                            padding: '6px 10px'
+                          }}
+                          formatter={(value) => [`${value.toFixed(2)}€`, 'Saldo']}
+                        />
+                        <Area 
+                          type="monotone" 
+                          dataKey="balance" 
+                          stroke="var(--color-accent)" 
+                          strokeWidth={1.5}
+                          fillOpacity={1} 
+                          fill={`url(#colorBalance-${br.id})`} 
+                          isAnimationActive={false}
+                        />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                );
+              })()}
 
               {/* Stats Grid */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', textAlign: 'center' }}>

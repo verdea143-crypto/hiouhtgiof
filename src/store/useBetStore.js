@@ -69,6 +69,7 @@ export const useBetStore = create(
       isInitialized: false,
       isModalOpen: false,
       themeAccent: 'emerald',
+      taxRate: 0,
 
       // Helper Getters (Selectors)
       isCloudActive: () => db !== null,
@@ -114,6 +115,7 @@ export const useBetStore = create(
       // Actions
       setIsModalOpen: (isOpen) => set({ isModalOpen: isOpen }),
       setThemeAccent: (accent) => set({ themeAccent: accent }),
+      setTaxRate: (rate) => set({ taxRate: Number(rate) || 0 }),
 
       initStore: async () => {
         if (get().isInitialized) return;
@@ -582,7 +584,8 @@ export const useBetStore = create(
         const newTipster = {
           ...tipsterData,
           id: generateId('tipster'),
-          user_id: userId
+          user_id: userId,
+          monthly_cost: Number(tipsterData.monthly_cost) || 0
         };
 
         if (db && user) {
@@ -606,12 +609,17 @@ export const useBetStore = create(
       },
 
       updateTipster: async (updatedTipster) => {
+        const cleanTipster = {
+          ...updatedTipster,
+          monthly_cost: Number(updatedTipster.monthly_cost) || 0
+        };
+
         if (db && get().user) {
           set({ isLoading: true });
           try {
-            await setDoc(doc(db, 'tipsters', updatedTipster.id), updatedTipster);
+            await setDoc(doc(db, 'tipsters', cleanTipster.id), cleanTipster);
             set(state => ({
-              tipsters: state.tipsters.map(t => t.id === updatedTipster.id ? updatedTipster : t)
+              tipsters: state.tipsters.map(t => t.id === cleanTipster.id ? cleanTipster : t)
             }));
             toast.success('Tipster modificado con éxito.');
           } catch (e) {
@@ -624,7 +632,7 @@ export const useBetStore = create(
         } else {
           // Local Mode
           set(state => ({
-            tipsters: state.tipsters.map(t => t.id === updatedTipster.id ? updatedTipster : t)
+            tipsters: state.tipsters.map(t => t.id === cleanTipster.id ? cleanTipster : t)
           }));
           toast.success('Tipster modificado localmente.');
         }
@@ -700,6 +708,41 @@ export const useBetStore = create(
           set(state => ({ transactions: [...state.transactions, newTrans] }));
           toast.success('Transacción registrada localmente.');
         }
+      },
+
+      importBets: async (betsArray) => {
+        const { user } = get();
+        const userId = user ? (user.uid || user.id) : 'local_user';
+        
+        const betsWithUser = betsArray.map(b => ({
+          ...b,
+          id: b.id || generateId('bet'),
+          user_id: userId,
+          date: b.date || new Date().toISOString().split('T')[0],
+          status: b.status || 'pending',
+          odds: Number(b.odds) || 1.0,
+          stake: Number(b.stake) || 0,
+          stake_units: Number(b.stake_units) || 0
+        }));
+
+        if (db && user) {
+          set({ isLoading: true });
+          try {
+            await batchInsertDocs(db, 'bets', betsWithUser);
+            set(state => ({ bets: [...betsWithUser, ...state.bets] }));
+            toast.success(`${betsWithUser.length} apuestas importadas con éxito en la nube.`);
+          } catch (e) {
+            console.error('Error importing bets to Firestore:', e);
+            toast.error(`Error al importar apuestas: ${e.message}`);
+            throw e;
+          } finally {
+            set({ isLoading: false });
+          }
+        } else {
+          // Local Mode
+          set(state => ({ bets: [...betsWithUser, ...state.bets] }));
+          toast.success(`${betsWithUser.length} apuestas importadas localmente.`);
+        }
       }
     }),
     {
@@ -708,7 +751,9 @@ export const useBetStore = create(
         bets: state.bets,
         bankrolls: state.bankrolls,
         tipsters: state.tipsters,
-        transactions: state.transactions
+        transactions: state.transactions,
+        themeAccent: state.themeAccent,
+        taxRate: state.taxRate
       })
     }
   )

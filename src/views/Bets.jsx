@@ -16,11 +16,14 @@ import {
   XCircle,
   HelpCircle,
   MinusCircle,
-  Download
+  Download,
+  Calculator
 } from 'lucide-react';
 import { useBetStore } from '../store/useBetStore';
 import { CustomSelect } from '../components/CustomSelect';
 import { exportToCSV } from '../utils/exportCSV';
+import { calculateKelly, calculateHedging } from '../utils/math';
+import { toast } from 'sonner';
 
 // Validation Schema
 const betSchema = z.object({
@@ -52,6 +55,50 @@ export const Bets = () => {
   // States
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingBet, setEditingBet] = useState(null);
+
+  // Quick Calculator States
+  const [isCalcOpen, setIsCalcOpen] = useState(false);
+  const [calcTab, setCalcTab] = useState('kelly');
+  const [calcKellyOdds, setCalcKellyOdds] = useState('2.00');
+  const [calcKellyProb, setCalcKellyProb] = useState('50');
+  const [calcKellyFraction, setCalcKellyFraction] = useState('0.5');
+  const [calcHedgeStake, setCalcHedgeStake] = useState('10');
+  const [calcHedgeOdds, setCalcHedgeOdds] = useState('3.00');
+  const [calcHedgeLiveOdds, setCalcHedgeLiveOdds] = useState('1.80');
+
+  const kellyResult = useMemo(() => {
+    const o = parseFloat(calcKellyOdds) || 0;
+    const p = parseFloat(calcKellyProb) || 0;
+    const f = parseFloat(calcKellyFraction) || 0.5;
+    const activeBankroll = watchBankrollId || bankrolls[0]?.id;
+    const balance = activeBankroll ? getBankrollBalance(activeBankroll) : 1000;
+    return calculateKelly(o, p, balance, f);
+  }, [calcKellyOdds, calcKellyProb, calcKellyFraction, watchBankrollId, bankrolls, getBankrollBalance]);
+
+  const hedgingResult = useMemo(() => {
+    const s = parseFloat(calcHedgeStake) || 0;
+    const o = parseFloat(calcHedgeOdds) || 0;
+    const lo = parseFloat(calcHedgeLiveOdds) || 0;
+    return calculateHedging(s, o, lo);
+  }, [calcHedgeStake, calcHedgeOdds, calcHedgeLiveOdds]);
+
+  const handleApplyKelly = () => {
+    setValue('odds', calcKellyOdds, { shouldValidate: true });
+    setValue('stake_percent', kellyResult.percentage.toFixed(1), { shouldValidate: true });
+    setIsCalcOpen(false);
+    toast.success("Valores de Kelly aplicados al formulario.");
+  };
+
+  const handleApplyHedge = () => {
+    const activeBankroll = watchBankrollId || bankrolls[0]?.id;
+    const balance = activeBankroll ? getBankrollBalance(activeBankroll) : 1000;
+    const hedgePct = balance > 0 ? (hedgingResult.hedgeStake / balance) * 100 : 0;
+    
+    setValue('odds', calcHedgeLiveOdds, { shouldValidate: true });
+    setValue('stake_percent', hedgePct.toFixed(1), { shouldValidate: true });
+    setIsCalcOpen(false);
+    toast.success("Valores de cobertura aplicados al formulario.");
+  };
   
   // Filters State
   const [searchTerm, setSearchTerm] = useState('');
@@ -557,7 +604,35 @@ export const Bets = () => {
 
               <div className="grid-cols-2" style={{ gap: '14px' }}>
                 <div className="form-group">
-                  <label htmlFor="odds" className="form-label">Cuota</label>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <label htmlFor="odds" className="form-label">Cuota</label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const currentOdds = watch('odds');
+                        if (currentOdds && !isNaN(parseFloat(currentOdds))) {
+                          setCalcKellyOdds(String(currentOdds));
+                        }
+                        setIsCalcOpen(true);
+                      }}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: 'var(--color-accent)',
+                        fontSize: '11px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        padding: 0,
+                        fontWeight: 600
+                      }}
+                      aria-label="Abrir calculadora rápida"
+                    >
+                      <Calculator size={12} />
+                      Calculadora
+                    </button>
+                  </div>
                   <input 
                     id="odds"
                     type="number" 
@@ -692,6 +767,202 @@ export const Bets = () => {
 
             </form>
 
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Quick Calculator Modal Portal */}
+      {isCalcOpen && createPortal(
+        <div className="modal-overlay" style={{ zIndex: 1100 }}>
+          <div className="modal-content glass-panel animate-fade-in" style={{ maxWidth: '440px', width: '90%', padding: '20px' }}>
+            
+            {/* Header */}
+            <div className="flex-between" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '12px', marginBottom: '16px' }}>
+              <h3 style={{ fontSize: '18px', fontWeight: 700, color: '#f3f4f6', display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}>
+                <Calculator size={18} style={{ color: 'var(--color-accent)' }} />
+                <span>Calculadora de Apuestas</span>
+              </h3>
+              <button 
+                type="button"
+                onClick={() => setIsCalcOpen(false)} 
+                className="btn-icon" 
+                style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--color-text-secondary)' }}
+                aria-label="Cerrar calculadora"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Tabs */}
+            <div className="glass-panel" style={{ padding: '4px', display: 'flex', gap: '6px', marginBottom: '16px' }}>
+              {[
+                { id: 'kelly', label: 'Criterio Kelly' },
+                { id: 'hedging', label: 'Cobertura (Hedge)' }
+              ].map(tab => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setCalcTab(tab.id)}
+                  className="btn"
+                  style={{
+                    flex: 1,
+                    padding: '6px 12px',
+                    borderRadius: '8px',
+                    backgroundColor: calcTab === tab.id ? 'var(--color-accent)' : 'transparent',
+                    color: calcTab === tab.id ? '#030712' : 'var(--color-text-secondary)',
+                    fontWeight: 600,
+                    fontSize: '12px',
+                    cursor: 'pointer',
+                    border: 'none'
+                  }}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            {calcTab === 'kelly' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                  <div className="form-group">
+                    <label className="form-label">Cuota</label>
+                    <input 
+                      type="number" 
+                      step="0.01" 
+                      className="form-input" 
+                      value={calcKellyOdds} 
+                      onChange={(e) => setCalcKellyOdds(e.target.value)} 
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Probabilidad (%)</label>
+                    <input 
+                      type="number" 
+                      min="1" 
+                      max="99" 
+                      className="form-input" 
+                      value={calcKellyProb} 
+                      onChange={(e) => setCalcKellyProb(e.target.value)} 
+                    />
+                  </div>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Fracción de Kelly</label>
+                  <CustomSelect
+                    value={calcKellyFraction}
+                    onChange={(val) => setCalcKellyFraction(val)}
+                    options={[
+                      { value: '1.0', label: 'Full Kelly (1.0)' },
+                      { value: '0.5', label: 'Half Kelly (0.5)' },
+                      { value: '0.25', label: 'Quarter Kelly (0.25)' }
+                    ]}
+                  />
+                </div>
+
+                <div style={{ 
+                  padding: '12px', 
+                  borderRadius: '10px', 
+                  backgroundColor: 'rgba(16, 185, 129, 0.06)', 
+                  border: '1px solid rgba(16, 185, 129, 0.12)', 
+                  fontSize: '12px', 
+                  display: 'flex', 
+                  flexDirection: 'column', 
+                  gap: '6px',
+                  color: '#f3f4f6',
+                  marginTop: '4px'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: 'var(--color-text-secondary)' }}>Stake Kelly Sugerido:</span>
+                    <span style={{ fontWeight: 800, color: 'var(--color-emerald)' }}>{kellyResult.percentage.toFixed(1)}%</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: 'var(--color-text-secondary)' }}>Importe Sugerido:</span>
+                    <span style={{ fontWeight: 700 }}>{kellyResult.recommendedStake.toFixed(2)}€</span>
+                  </div>
+                  <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', marginTop: '2px', borderTop: '1px dotted rgba(255,255,255,0.04)', paddingTop: '4px' }}>
+                    Basado en saldo disponible de {selectedBankrollBalance.toFixed(2)}€
+                  </div>
+                </div>
+
+                <button 
+                  type="button" 
+                  onClick={handleApplyKelly} 
+                  disabled={kellyResult.percentage <= 0}
+                  className="btn btn-primary" 
+                  style={{ width: '100%', marginTop: '8px' }}
+                >
+                  Aplicar al Formulario
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+                  <div className="form-group">
+                    <label className="form-label">Stake Or.</label>
+                    <input 
+                      type="number" 
+                      className="form-input" 
+                      value={calcHedgeStake} 
+                      onChange={(e) => setCalcHedgeStake(e.target.value)} 
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Cuota Or.</label>
+                    <input 
+                      type="number" 
+                      className="form-input" 
+                      value={calcHedgeOdds} 
+                      onChange={(e) => setCalcHedgeOdds(e.target.value)} 
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Cuota Cob.</label>
+                    <input 
+                      type="number" 
+                      className="form-input" 
+                      value={calcHedgeLiveOdds} 
+                      onChange={(e) => setCalcHedgeLiveOdds(e.target.value)} 
+                    />
+                  </div>
+                </div>
+
+                <div style={{ 
+                  padding: '12px', 
+                  borderRadius: '10px', 
+                  backgroundColor: 'rgba(16, 185, 129, 0.06)', 
+                  border: '1px solid rgba(16, 185, 129, 0.12)', 
+                  fontSize: '12px', 
+                  display: 'flex', 
+                  flexDirection: 'column', 
+                  gap: '6px',
+                  color: '#f3f4f6',
+                  marginTop: '4px'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: 'var(--color-text-secondary)' }}>Stake de Cobertura:</span>
+                    <span style={{ fontWeight: 800, color: 'var(--color-emerald)' }}>{hedgingResult.hedgeStake.toFixed(2)}€</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: 'var(--color-text-secondary)' }}>Ganancia Garantizada:</span>
+                    <span style={{ fontWeight: 700, color: hedgingResult.profitIfHedgeWins >= 0 ? 'var(--color-emerald)' : 'var(--color-crimson)' }}>
+                      {hedgingResult.profitIfHedgeWins.toFixed(2)}€
+                    </span>
+                  </div>
+                </div>
+
+                <button 
+                  type="button" 
+                  onClick={handleApplyHedge} 
+                  disabled={!hedgingResult.hedgeStake || hedgingResult.hedgeStake <= 0}
+                  className="btn btn-primary" 
+                  style={{ width: '100%', marginTop: '8px' }}
+                >
+                  Aplicar al Formulario
+                </button>
+              </div>
+            )}
           </div>
         </div>,
         document.body

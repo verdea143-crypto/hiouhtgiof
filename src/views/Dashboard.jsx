@@ -35,6 +35,7 @@ export const Dashboard = () => {
   const bankrolls = useBetStore(state => state.bankrolls);
   const tipsters = useBetStore(state => state.tipsters);
   const themeAccent = useBetStore(state => state.themeAccent);
+  const taxRate = useBetStore(state => state.taxRate || 0);
 
   const [activeTab, setActiveTab] = useState('summary'); // summary, analytics
   
@@ -86,6 +87,54 @@ export const Dashboard = () => {
   const stats = useMemo(() => {
     return calculateStats(filteredBets, bankrolls);
   }, [filteredBets, bankrolls]);
+
+  const financialSummary = useMemo(() => {
+    const grossProfit = stats.netProfit;
+    
+    const getMonthsInRange = (betsList) => {
+      if (!betsList || betsList.length === 0) return 1;
+      const dates = betsList.map(b => new Date(b.date)).filter(d => !isNaN(d));
+      if (dates.length === 0) return 1;
+      const minDate = new Date(Math.min(...dates));
+      const maxDate = new Date(Math.max(...dates));
+      const yearsDiff = maxDate.getFullYear() - minDate.getFullYear();
+      const monthsDiff = maxDate.getMonth() - minDate.getMonth();
+      const totalMonths = (yearsDiff * 12) + monthsDiff + 1;
+      return Math.max(1, totalMonths);
+    };
+
+    let months = 1;
+    if (dateRange === 'month' || dateRange === 'prev_month' || dateRange === '30days') {
+      months = 1;
+    } else if (dateRange === 'year') {
+      months = new Date().getMonth() + 1;
+    } else if (dateRange === 'custom') {
+      const start = customStart ? new Date(customStart) : null;
+      const end = customEnd ? new Date(customEnd) : new Date();
+      if (start) {
+        const yearsDiff = end.getFullYear() - start.getFullYear();
+        const monthsDiff = end.getMonth() - start.getMonth();
+        months = Math.max(1, (yearsDiff * 12) + monthsDiff + 1);
+      } else {
+        months = getMonthsInRange(filteredBets);
+      }
+    } else {
+      months = getMonthsInRange(bets);
+    }
+
+    const totalTipsterMonthlyCost = tipsters.reduce((sum, t) => sum + (Number(t.monthly_cost) || 0), 0);
+    const totalTipsterCosts = totalTipsterMonthlyCost * months;
+    const taxAmount = grossProfit > 0 ? (grossProfit * (taxRate / 100)) : 0;
+    const netProfitReal = grossProfit - taxAmount - totalTipsterCosts;
+
+    return {
+      grossProfit,
+      months,
+      totalTipsterCosts,
+      taxAmount,
+      netProfitReal
+    };
+  }, [bets, filteredBets, tipsters, taxRate, dateRange, customStart, customEnd, stats.netProfit]);
 
   // Chart Data: Cumulative Profit over time
   const areaChartData = useMemo(() => {
@@ -661,22 +710,47 @@ export const Dashboard = () => {
         {/* Beneficio Neto Card */}
         <div className="glass-panel" style={{ 
           padding: '20px', 
-          borderLeft: `4px solid ${stats.netProfit >= 0 ? 'var(--color-emerald)' : 'var(--color-crimson)'}`,
-          boxShadow: stats.netProfit >= 0 ? '0 10px 20px -10px rgba(16,185,129,0.1)' : '0 10px 20px -10px rgba(239,68,68,0.1)'
+          borderLeft: `4px solid ${financialSummary.netProfitReal >= 0 ? 'var(--color-emerald)' : 'var(--color-crimson)'}`,
+          boxShadow: financialSummary.netProfitReal >= 0 ? '0 10px 20px -10px rgba(16,185,129,0.1)' : '0 10px 20px -10px rgba(239,68,68,0.1)'
         }}>
-          <div className="flex-between" style={{ marginBottom: '8px' }}>
-            <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--color-text-secondary)' }}>Beneficio Neto</span>
-            {stats.netProfit >= 0 
+          <div className="flex-between" style={{ marginBottom: '6px' }}>
+            <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--color-text-secondary)' }}>Beneficio Neto (Real)</span>
+            {financialSummary.netProfitReal >= 0 
               ? <GainIcon size={20} style={{ color: 'var(--color-emerald)' }} />
               : <LossIcon size={20} style={{ color: 'var(--color-crimson)' }} />
             }
           </div>
-          <div style={{ fontSize: '28px', fontWeight: 800, color: stats.netProfit >= 0 ? '#10b981' : '#ef4444' }}>
-            {stats.netProfit >= 0 ? '+' : ''}{stats.netProfit.toFixed(2)}€
+          <div style={{ fontSize: '28px', fontWeight: 800, color: financialSummary.netProfitReal >= 0 ? '#10b981' : '#ef4444', lineHeight: 1.2 }}>
+            {financialSummary.netProfitReal >= 0 ? '+' : ''}{financialSummary.netProfitReal.toFixed(2)}€
           </div>
-          <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
+          <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', display: 'block', marginBottom: '8px' }}>
             Total apostado: {stats.totalStaked.toFixed(2)}€
           </span>
+
+          {/* Desglose Breakdown */}
+          <div style={{ 
+            marginTop: '8px', 
+            paddingTop: '8px', 
+            borderTop: '1px solid rgba(255,255,255,0.06)', 
+            display: 'flex', 
+            flexDirection: 'column', 
+            gap: '4px', 
+            fontSize: '11px', 
+            color: 'var(--color-text-secondary)' 
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span>Beneficio Bruto:</span>
+              <span style={{ fontWeight: 600, color: '#f3f4f6' }}>{financialSummary.grossProfit >= 0 ? '+' : ''}{financialSummary.grossProfit.toFixed(2)}€</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span>Impuestos ({taxRate}%):</span>
+              <span style={{ fontWeight: 600, color: financialSummary.taxAmount > 0 ? 'var(--color-crimson)' : 'var(--color-text-muted)' }}>-{financialSummary.taxAmount.toFixed(2)}€</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span>Tipsters ({financialSummary.months} {financialSummary.months === 1 ? 'mes' : 'meses'}):</span>
+              <span style={{ fontWeight: 600, color: financialSummary.totalTipsterCosts > 0 ? 'var(--color-crimson)' : 'var(--color-text-muted)' }}>-{financialSummary.totalTipsterCosts.toFixed(2)}€</span>
+            </div>
+          </div>
         </div>
 
         {/* Yield Card */}

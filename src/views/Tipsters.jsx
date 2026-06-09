@@ -21,7 +21,8 @@ import { calculateStats } from '../utils/math';
 // Validation Schema
 const tipsterSchema = z.object({
   name: z.string().min(1, 'El nombre es requerido'),
-  description: z.string().optional().nullable()
+  description: z.string().optional().nullable(),
+  monthly_cost: z.preprocess((val) => val === '' ? 0 : Number(val), z.number({ invalid_type_error: 'El coste mensual debe ser un número' }).min(0, 'El coste no puede ser negativo')).default(0)
 });
 
 export const Tipsters = () => {
@@ -42,7 +43,8 @@ export const Tipsters = () => {
     resolver: zodResolver(tipsterSchema),
     defaultValues: {
       name: '',
-      description: ''
+      description: '',
+      monthly_cost: 0
     }
   });
 
@@ -50,7 +52,8 @@ export const Tipsters = () => {
     setEditingTipster(null);
     reset({
       name: '',
-      description: ''
+      description: '',
+      monthly_cost: 0
     });
     setIsModalOpen(true);
     setGlobalModalOpen(true);
@@ -58,7 +61,11 @@ export const Tipsters = () => {
 
   const handleOpenEdit = (tipster) => {
     setEditingTipster(tipster);
-    reset(tipster);
+    reset({
+      name: tipster.name || '',
+      description: tipster.description || '',
+      monthly_cost: tipster.monthly_cost || 0
+    });
     setIsModalOpen(true);
     setGlobalModalOpen(true);
   };
@@ -222,6 +229,7 @@ export const Tipsters = () => {
             <thead>
               <tr>
                 <th>Nombre / Descripción</th>
+                <th>Suscripción</th>
                 <th>Beneficio Neto</th>
                 <th>Yield %</th>
                 <th>Aciertos %</th>
@@ -237,6 +245,9 @@ export const Tipsters = () => {
                     <td>
                       <div style={{ fontWeight: 600, color: '#f3f4f6' }}>{t.name}</div>
                       <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>{t.description || 'Sin descripción'}</div>
+                    </td>
+                    <td style={{ fontWeight: 600, color: '#f3f4f6' }}>
+                      {t.monthly_cost ? `${Number(t.monthly_cost).toFixed(2)}€/mes` : 'Gratuito'}
                     </td>
                     <td style={{ fontWeight: 700, color: t.stats.netProfit >= 0 ? 'var(--color-emerald)' : 'var(--color-crimson)' }}>
                       {t.stats.netProfit >= 0 ? '+' : ''}{t.stats.netProfit.toFixed(2)}€
@@ -328,6 +339,18 @@ export const Tipsters = () => {
                   {...register('description')}
                   style={{ resize: 'none', fontFamily: 'inherit' }}
                 />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Coste Mensual de Suscripción (€)</label>
+                <input 
+                  type="number" 
+                  step="0.01" 
+                  placeholder="0.00" 
+                  className="form-input"
+                  {...register('monthly_cost')}
+                />
+                {errors.monthly_cost && <span className="form-error">{errors.monthly_cost.message}</span>}
               </div>
 
               {/* Actions */}
